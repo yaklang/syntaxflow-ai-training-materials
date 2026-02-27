@@ -1,0 +1,60 @@
+name: Validate Structure (SyntaxFlow AIKB)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check required directories exist
+        run: |
+          echo "=== Validating SyntaxFlow AIKB structure ==="
+          REQUIRED_DIRS="basic-syntax practice rule-examples examples-rule awesome-rule scripts"
+          for dir in $REQUIRED_DIRS; do
+            if [ -d "$dir" ]; then
+              COUNT=$(find "$dir" -type f \( -name "*.md" -o -name "*.sf" \) 2>/dev/null | wc -l)
+              echo "✓ $dir ($COUNT .md/.sf files)"
+            else
+              echo "✗ Missing directory: $dir"
+              exit 1
+            fi
+          done
+          echo ""
+          echo "✓ All required directories present"
+
+      - name: Check key scripts exist
+        run: |
+          REQUIRED_SCRIPTS="merge-in-one-text.yak build-syntaxflow-aikb-rag.yak diff-zip-v2.yak update-rag.yak check-aikb-online.yak"
+          for script in $REQUIRED_SCRIPTS; do
+            if [ -f "scripts/$script" ]; then
+              echo "✓ scripts/$script"
+            else
+              echo "✗ Missing script: scripts/$script"
+              exit 1
+            fi
+          done
+          echo ""
+          echo "✓ All required scripts present"
+
+      - name: Dry-run merge (optional)
+        run: |
+          echo "=== Testing merge script (dry run) ==="
+          YAK_VERSION="1.4.5-beta5"
+          wget -q -O ./yak "https://yaklang.oss-accelerate.aliyuncs.com/yak/${YAK_VERSION}/yak_linux_amd64"
+          chmod +x ./yak
+          ./yak scripts/merge-in-one-text.yak --base . --output /tmp/test-merge.zip
+          if [ -f /tmp/test-merge.zip ]; then
+            FILE_COUNT=$(unzip -l /tmp/test-merge.zip 2>/dev/null | tail -1 | awk '{print $2}')
+            echo "✓ Merge produced ZIP with $FILE_COUNT files"
+          else
+            echo "⚠️ Merge script did not produce output (non-fatal)"
+          fi

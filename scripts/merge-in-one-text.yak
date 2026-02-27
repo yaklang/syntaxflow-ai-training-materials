@@ -2,7 +2,7 @@
 
 // =============================================================================
 // SyntaxFlow AIKB 文档打包工具 - Merge docs into one ZIP
-// 功能: 将 basic-syntax、practice、rule-examples、examples-rule 下的 .md 和 .sf 打包为 ZIP
+// 功能: 将 basic-syntax、practice、rule-examples、examples-rule、awesome-rule 下的 .md 和 .sf 打包为 ZIP
 // 用途: 用于训练或增量更新 RAG 知识库
 //
 // 使用示例:
@@ -26,7 +26,7 @@ if baseDir == "." {
 
 log.Info("Base directory: %s", baseDir)
 
-targetFolders = ["basic-syntax", "practice", "rule-examples", "examples-rule"]
+targetFolders = ["basic-syntax", "practice", "rule-examples", "examples-rule", "awesome-rule"]
 
 zipMaterial = {}
 for folder in targetFolders {

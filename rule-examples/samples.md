@@ -59,3 +59,15 @@ DocumentBuilderFactory...parse()
 - `g"a*"` glob
 - `r"regex"` 正则
 - `e<<<CODE password CODE` 精确匹配
+
+## 带测试用例的 desc 结构
+
+规则应有两个 `desc`：第一个为元数据，第二个为测试用例（`file://`、`safefile://`）。详见 [intro-and-desc.md](../basic-syntax/intro-and-desc.md)。
+
+```syntaxflow
+desc(title: "...", type: audit, ...);
+// 规则体：include、dataflow、alert
+desc(lang: golang, alert_high: 1,
+    'file://vuln.go': <<<UNSAFE ... UNSAFE,
+    'safefile://safe.go': <<<SAFE ... SAFE);
+```

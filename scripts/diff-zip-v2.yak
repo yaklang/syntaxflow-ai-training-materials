@@ -1,0 +1,230 @@
+#!/usr/bin/env yak
+
+// =============================================================================
+// SyntaxFlow AIKB ZIP 差异分析工具
+// 功能: 对比新旧 ZIP，生成差异包 (diff-fs.zip) 和 Markdown 报告
+// 用途: 用于 CI 增量更新 RAG 知识库
+//
+// 使用示例:
+//   ./yak scripts/diff-zip-v2.yak --old syntaxflow-aikb-old.zip --new syntaxflow-aikb.zip --output diff-fs.zip
+// =============================================================================
+
+__DESC__ = "Compare two SyntaxFlow AIKB ZIP files and create diff ZIP package"
+
+yakit.AutoInitYakit()
+
+oldZipPath = cli.String("old", cli.setRequired(true), cli.setHelp("Path to the old ZIP file"))
+newZipPath = cli.String("new", cli.setRequired(true), cli.setHelp("Path to the new ZIP file"))
+outputPath = cli.String("output", cli.setDefault("diff-fs.zip"), cli.setHelp("Output diff ZIP file path"))
+
+cli.check()
+
+if oldZipPath == "" || newZipPath == "" {
+    die("Both --old and --new parameters are required")
+}
+
+if !file.IsExisted(oldZipPath) {
+    die(sprintf("Old ZIP file does not exist: %s", oldZipPath))
+}
+
+if !file.IsExisted(newZipPath) {
+    die(sprintf("New ZIP file does not exist: %s", newZipPath))
+}
+
+log.info("Analyzing SyntaxFlow AIKB ZIP files using diff.DiffZIPFile...")
+log.info("Old: %s", oldZipPath)
+log.info("New: %s", newZipPath)
+
+changeStats = {"added": [], "modified": [], "deleted": []}
+diffFiles = make(map[string]string)
+allDiffFiles = []
+changedDocs = []
+addedDocs = []
+deletedDocs = []
+
+// 检查是否为 SyntaxFlow 文档文件 (.md 或 .sf)
+isDocFile = func(name) {
+    return str.HasSuffix(name, ".md") || str.HasSuffix(name, ".sf")
+}
+
+newFilesContent = make(map[string]string)
+err = zip.Recursive(newZipPath, func(isDir, pathName, info) {
+    if !isDir {
+        try {
+            content = zip.ExtractFile(newZipPath, pathName)~
+            newFilesContent[pathName] = string(content)
+        } catch extractErr {
+            log.error("Failed to extract file %s: %v", pathName, extractErr)
+        }
+    }
+})
+if err != nil {
+    log.error("Failed to scan new ZIP file: %v", err)
+}
+
+log.info("New ZIP contains %d files", len(newFilesContent))
+
+_, err = diff.DiffZIPFile(oldZipPath, newZipPath, func(commit, change, patch) {
+    if patch == nil {
+        return
+    }
+    patchStr = patch.String()
+    if patchStr.Contains("new file mode") {
+        lines = str.Split(patchStr, "\n")
+        for line in lines {
+            if str.HasPrefix(line, "+++ b/") {
+                filename = str.TrimPrefix(line, "+++ b/")
+                changeStats["added"] = append(changeStats["added"], filename)
+                if newFilesContent[filename] != nil {
+                    diffFiles[filename] = newFilesContent[filename]
+                    allDiffFiles = append(allDiffFiles, filename)
+                    if isDocFile(filename) {
+                        addedDocs = append(addedDocs, filename)
+                    }
+                }
+                log.info("Detected added file: %s", filename)
+                break
+            }
+        }
+    } else if patchStr.Contains("deleted file mode") {
+        lines = str.Split(patchStr, "\n")
+        for line in lines {
+            if str.HasPrefix(line, "--- a/") {
+                filename = str.TrimPrefix(line, "--- a/")
+                changeStats["deleted"] = append(changeStats["deleted"], filename)
+                if isDocFile(filename) {
+                    deletedDocs = append(deletedDocs, filename)
+                }
+                log.info("Detected deleted file: %s", filename)
+                break
+            }
+        }
+    } else {
+        lines = str.Split(patchStr, "\n")
+        for line in lines {
+            if str.HasPrefix(line, "+++ b/") {
+                filename = str.TrimPrefix(line, "+++ b/")
+                alreadyAdded = false
+                for _, existing in changeStats["modified"] {
+                    if existing == filename {
+                        alreadyAdded = true
+                        break
+                    }
+                }
+                if !alreadyAdded {
+                    changeStats["modified"] = append(changeStats["modified"], filename)
+                    if newFilesContent[filename] != nil {
+                        diffFiles[filename] = newFilesContent[filename]
+                        allDiffFiles = append(allDiffFiles, filename)
+                        if isDocFile(filename) {
+                            changedDocs = append(changedDocs, filename)
+                        }
+                    }
+                    log.info("Detected changed file: %s", filename)
+                }
+                break
+            }
+        }
+    }
+})
+
+if err != nil {
+    log.error("Failed to analyze ZIP differences: %v", err)
+    die(sprintf("Failed to analyze ZIP differences: %v", err))
+}
+
+log.info("Doc files (.md/.sf): %d changed, %d added, %d deleted", len(changedDocs), len(addedDocs), len(deletedDocs))
+log.info("Total diff files: %d", len(diffFiles))
+
+if len(diffFiles) > 0 {
+    log.info("Creating diff ZIP with %d files...", len(diffFiles))
+    try {
+        diffZipBytes = zip.CompressRaw(diffFiles)~
+        err = file.Save(outputPath, diffZipBytes)
+        if err != nil {
+            log.error("Failed to save diff ZIP: %v", err)
+            die(sprintf("Failed to save diff ZIP to %s", outputPath))
+        }
+        log.info("Diff ZIP created: %s (%d bytes)", outputPath, len(diffZipBytes))
+    } catch compressErr {
+        log.error("Failed to compress: %v", compressErr)
+        die(sprintf("Failed to create diff ZIP: %v", compressErr))
+    }
+} else {
+    log.info("No changes detected, skipping diff ZIP creation")
+}
+
+reportPath = str.Replace(outputPath, ".zip", ".md", 1)
+report = sprintf("# SyntaxFlow AIKB ZIP 差异报告\n\n")
+report += sprintf("**比较时间**: %s\n\n", time.Now().Format("2006-01-02 15:04:05"))
+report += sprintf("**旧文件**: %s\n", oldZipPath)
+report += sprintf("**新文件**: %s\n", newZipPath)
+if len(diffFiles) > 0 {
+    report += sprintf("**差异包**: %s\n\n", outputPath)
+} else {
+    report += sprintf("**状态**: 无文件变动，未生成差异包\n\n")
+}
+
+if len(changedDocs) > 0 {
+    report += "## 变更的文档/规则文件：\n\n"
+    idx = 0
+    for f in changedDocs {
+        idx = idx + 1
+        report += sprintf("%d. %s\n", idx, f)
+    }
+    report += "\n"
+}
+if len(addedDocs) > 0 {
+    report += "## 新增文档/规则文件：\n\n"
+    idx = 0
+    for f in addedDocs {
+        idx = idx + 1
+        report += sprintf("%d. %s\n", idx, f)
+    }
+    report += "\n"
+}
+if len(deletedDocs) > 0 {
+    report += "## 删除的文档/规则文件：\n\n"
+    idx = 0
+    for f in deletedDocs {
+        idx = idx + 1
+        report += sprintf("%d. %s\n", idx, f)
+    }
+    report += "\n"
+}
+if len(allDiffFiles) > 0 {
+    report += "## 差异包包含的所有文件：\n\n"
+    idx = 0
+    for f in allDiffFiles {
+        idx = idx + 1
+        status = "新增"
+        for _, m in changeStats["modified"] {
+            if m == f {
+                status = "变更"
+                break
+            }
+        }
+        report += sprintf("%d. %s (%s)\n", idx, f, status)
+    }
+    report += "\n"
+}
+
+report += "## 统计信息\n\n"
+report += sprintf("- 新 ZIP 总文件数: %d\n", len(newFilesContent))
+report += sprintf("- 变更的 .md/.sf: %d\n", len(changedDocs))
+report += sprintf("- 新增的 .md/.sf: %d\n", len(addedDocs))
+report += sprintf("- 删除的 .md/.sf: %d\n", len(deletedDocs))
+report += sprintf("- 差异包文件总数: %d\n", len(diffFiles))
+report += sprintf("- 新增文件总数: %d\n", len(changeStats["added"]))
+report += sprintf("- 修改文件总数: %d\n", len(changeStats["modified"]))
+report += sprintf("- 删除文件总数: %d\n", len(changeStats["deleted"]))
+
+err = file.Save(reportPath, report)
+if err != nil {
+    log.error("Failed to write report: %v", err)
+} else {
+    log.info("Report generated: %s", reportPath)
+    println(report)
+}
+
+os.Exit(0)

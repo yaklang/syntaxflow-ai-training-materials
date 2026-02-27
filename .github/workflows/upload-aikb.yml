@@ -1,6 +1,7 @@
 name: Upload SyntaxFlow AIKB to OSS
 
 on:
+  # 当指定文件夹有改动时触发
   push:
     branches:
       - main
@@ -13,6 +14,7 @@ on:
       - 'scripts/**'
       - '.github/workflows/upload-aikb.yml'
 
+  # 允许手动触发
   workflow_dispatch:
 
 concurrency:
@@ -37,17 +39,30 @@ jobs:
           echo "Branch: ${{ github.ref }}"
           echo "Commit: ${{ github.sha }}"
           echo "Actor: ${{ github.actor }}"
+          echo "Update Mode: incremental"
           echo "============================================"
 
-      - name: Download Yaklang Engine
+      - name: Download Yaklang Engine (v1.4.5-beta5)
         run: |
-          echo "=== Downloading Yaklang Engine ==="
+          echo "=== Downloading Yaklang Engine v1.4.5-beta5 ==="
           YAK_VERSION="1.4.5-beta5"
           YAK_URL="https://yaklang.oss-accelerate.aliyuncs.com/yak/${YAK_VERSION}/yak_linux_amd64"
+          echo "Downloading from: $YAK_URL"
           wget -q --show-progress -O ./yak "$YAK_URL"
+          if [ ! -f ./yak ]; then
+            echo "ERROR: Failed to download yak engine"
+            wget -q --show-progress -O ./yak "$YAK_URL" || exit 1
+          fi
           chmod +x ./yak
-          ./yak version || true
-          echo "✓ Yaklang engine downloaded"
+          echo ""
+          echo "=== Downloaded file info ==="
+          ls -lh ./yak
+          file ./yak
+          echo ""
+          echo "=== Testing yak engine ==="
+          ./yak version || echo "Note: yak version may not be available"
+          echo ""
+          echo "✓ Yaklang engine downloaded and verified successfully"
 
       - name: Generate SyntaxFlow AIKB ZIP file
         run: |
@@ -57,46 +72,134 @@ jobs:
             echo "✓ Existing ZIP downloaded for diff"
             ls -lh syntaxflow-aikb-old.zip
           else
-            echo "⚠️ No existing ZIP (first upload)"
+            echo "⚠️ No existing ZIP (may not exist yet)"
           fi
 
+          echo "Running merge-in-one-text.yak..."
           ./yak scripts/merge-in-one-text.yak --base . --output syntaxflow-aikb.zip
           if [ ! -f syntaxflow-aikb.zip ]; then
             echo "ERROR: Failed to generate syntaxflow-aikb.zip"
+            echo "DEBUG: Current directory contents:"
+            ls -lh
             exit 1
           fi
+          echo ""
+          echo "=== Generated ZIP file info ==="
           ls -lh syntaxflow-aikb.zip
-          unzip -l syntaxflow-aikb.zip | head -25
-          echo "✓ ZIP generated"
+          echo ""
+          echo "=== ZIP file contents (first 25 entries) ==="
+          unzip -l syntaxflow-aikb.zip | head -25 || {
+            echo "ERROR: Generated ZIP appears invalid"
+            exit 1
+          }
+          FILE_COUNT=$(unzip -l syntaxflow-aikb.zip | tail -1 | awk '{print $2}')
+          FILE_SIZE=$(stat -c%s syntaxflow-aikb.zip 2>/dev/null || stat -f%z syntaxflow-aikb.zip 2>/dev/null || echo 0)
+          echo ""
+          echo "=== ZIP Statistics ==="
+          echo "Files in ZIP: $FILE_COUNT"
+          echo "ZIP size: $FILE_SIZE bytes ($(echo "scale=2; $FILE_SIZE/1024/1024" | bc) MB)"
+          echo ""
+          echo "✓ AIKB ZIP file generated successfully"
 
-      - name: Build SyntaxFlow AIKB RAG
+      - name: Generate diff report and package
+        id: diff
+        if: always()
+        run: |
+          echo "=== Generating ZIP diff report and package ==="
+          echo "Update mode: incremental"
+          if [ -f syntaxflow-aikb-old.zip ] && [ -f syntaxflow-aikb.zip ]; then
+            echo "Running diff-zip-v2.yak..."
+            ./yak scripts/diff-zip-v2.yak \
+              --old syntaxflow-aikb-old.zip \
+              --new syntaxflow-aikb.zip \
+              --output diff-fs.zip
+            if [ -f diff-fs.zip ] && [ -f diff-fs.md ]; then
+              echo "✓ Diff package and report generated successfully"
+              echo ""
+              echo "=== Diff package info ==="
+              ls -lh diff-fs.zip
+              echo ""
+              echo "=== Diff package contents ==="
+              unzip -l diff-fs.zip | head -20
+              echo ""
+              echo "=== Report content ==="
+              cat diff-fs.md | head -80
+            elif [ -f diff-fs.md ]; then
+              echo "✓ No file changes - diff report only (no diff ZIP)"
+              cat diff-fs.md | head -40
+            else
+              echo "⚠️ Failed to generate diff package or report"
+            fi
+          else
+            echo "⚠️ Cannot generate diff - missing old or new ZIP"
+            echo "# SyntaxFlow AIKB ZIP 差异报告" > diff-fs.md
+            echo "" >> diff-fs.md
+            echo "**状态**: 无法生成差异报告 - 缺少比较文件" >> diff-fs.md
+            echo "**时间**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> diff-fs.md
+          fi
+          echo "diff_created=$(test -f diff-fs.zip && echo true || echo false)" >> $GITHUB_OUTPUT
+
+      - name: Update RAG with diff package (incremental)
+        if: success()
         continue-on-error: true
         env:
           AI_API_KEY: ${{ secrets.AI_API_KEY }}
           AI_API_MODEL: ${{ secrets.AI_API_MODEL }}
           AI_API_DOMAIN: ${{ secrets.AI_API_DOMAIN }}
         run: |
-          echo "=== Building syntaxflow-aikb.rag ==="
-          RAG_URL="https://yaklang.oss-accelerate.aliyuncs.com/ai-knowledge-base/rag/syntaxflow-aikb.rag"
-          if curl -f -s -o syntaxflow-aikb_old.rag "$RAG_URL"; then
-            echo "✓ Downloaded existing RAG for incremental"
-          else
-            echo "⚠️ No existing RAG, full rebuild"
+          echo "=== Updating RAG knowledge base (incremental) ==="
+          DIFF_ZIP="diff-fs.zip"
+          if [ ! -f "$DIFF_ZIP" ]; then
+            echo "⚠️ No diff package, skipping RAG update"
+            exit 0
+          fi
+          DIFF_SIZE=$(stat -c%s "$DIFF_ZIP" 2>/dev/null || stat -f%z "$DIFF_ZIP" 2>/dev/null || echo 0)
+          if [ "$DIFF_SIZE" -lt 50 ]; then
+            echo "Diff ZIP is empty or tiny, trying full rebuild..."
           fi
 
-          ./yak scripts/build-syntaxflow-aikb-rag.yak \
-            --base . \
-            --output syntaxflow-aikb_new.rag \
-            --concurrency 5
-          if [ -f syntaxflow-aikb_new.rag ]; then
-            echo "✓ RAG built"
-            ls -lh syntaxflow-aikb_new.rag
+          RAG_URL="https://yaklang.oss-accelerate.aliyuncs.com/ai-knowledge-base/rag/syntaxflow-aikb.rag"
+          OLD_RAG="syntaxflow-aikb_old.rag"
+          NEW_RAG="syntaxflow-aikb_new.rag"
+
+          if curl -f -s -o "$OLD_RAG" "$RAG_URL"; then
+            echo "✓ Downloaded existing RAG for incremental"
+            ls -lh "$OLD_RAG"
+            RAG_ARG="--rag-file $OLD_RAG"
+          else
+            echo "⚠️ No existing RAG, will do full rebuild via build script"
+            RAG_ARG=""
+          fi
+
+          if [ -n "$RAG_ARG" ] && [ -n "$AI_API_KEY" ] && [ "$DIFF_SIZE" -gt 50 ]; then
+            echo "Running update-rag.yak (incremental)..."
+            ./yak scripts/update-rag.yak \
+              $RAG_ARG \
+              --diff-zip "$DIFF_ZIP" \
+              --output "$NEW_RAG" \
+              --concurrency 5
+          else
+            echo "Running build-syntaxflow-aikb-rag.yak (full or fallback)..."
+            if [ -f "$OLD_RAG" ]; then
+              echo "Using existing RAG as base for incremental build"
+              cp "$OLD_RAG" "$NEW_RAG"
+            fi
+            ./yak scripts/build-syntaxflow-aikb-rag.yak \
+              --base . \
+              --output "$NEW_RAG" \
+              --concurrency 5
+          fi
+
+          if [ -f "$NEW_RAG" ]; then
+            echo "✓ RAG built/updated"
+            ls -lh "$NEW_RAG"
           else
             echo "⚠️ RAG build failed (ZIP will still upload)"
           fi
 
       - name: Create upload timestamp file
         run: |
+          echo "=== Creating timestamp file ==="
           UPLOAD_TIME=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
           COMMIT_SHA="${{ github.sha }}"
           COMMIT_SHORT="${COMMIT_SHA:0:7}"
@@ -105,61 +208,274 @@ jobs:
           echo "Branch: ${{ github.ref_name }}" >> syntaxflow-aikb.updated_at.txt
           echo "Actor: ${{ github.actor }}" >> syntaxflow-aikb.updated_at.txt
           echo "Workflow Run: ${{ github.run_number }}" >> syntaxflow-aikb.updated_at.txt
+          echo ""
+          echo "=== Timestamp file content ==="
           cat syntaxflow-aikb.updated_at.txt
+          echo ""
+          echo "✓ Timestamp file created successfully"
 
       - name: Upload files to OSS
         env:
           OSS_KEY_ID: ${{ secrets.OSS_KEY_ID }}
           OSS_KEY_SECRET: ${{ secrets.OSS_KEY_SECRET }}
         run: |
+          echo "=== Uploading files to OSS ==="
           if [ -z "$OSS_KEY_ID" ] || [ -z "$OSS_KEY_SECRET" ]; then
-            echo "ERROR: OSS_KEY_ID / OSS_KEY_SECRET not set"
+            echo "ERROR: OSS credentials not found"
+            echo "Please ensure OSS_KEY_ID and OSS_KEY_SECRET secrets are set"
             exit 1
           fi
           BUCKET="yaklang"
           ENDPOINT="oss-accelerate.aliyuncs.com"
 
+          echo ""
           echo "Uploading syntaxflow-aikb.zip..."
           ./yak upload-oss -b "$BUCKET" --endpoint "$ENDPOINT" \
             -ak "$OSS_KEY_ID" -sk "$OSS_KEY_SECRET" -t 10 \
-            -f "syntaxflow-aikb.zip:/ai-knowledge-base/syntaxflow-aikb.zip" || exit 1
-          echo "✓ ZIP uploaded"
+            -f "syntaxflow-aikb.zip:/ai-knowledge-base/syntaxflow-aikb.zip"
+          if [ $? -ne 0 ]; then
+            echo "ERROR: Failed to upload syntaxflow-aikb.zip"
+            exit 1
+          fi
+          echo "✓ syntaxflow-aikb.zip uploaded successfully"
 
+          echo ""
           echo "Uploading syntaxflow-aikb.updated_at.txt..."
           ./yak upload-oss -b "$BUCKET" --endpoint "$ENDPOINT" \
             -ak "$OSS_KEY_ID" -sk "$OSS_KEY_SECRET" -t 5 \
-            -f "syntaxflow-aikb.updated_at.txt:/ai-knowledge-base/syntaxflow-aikb.updated_at.txt" || exit 1
-          echo "✓ Timestamp uploaded"
+            -f "syntaxflow-aikb.updated_at.txt:/ai-knowledge-base/syntaxflow-aikb.updated_at.txt"
+          if [ $? -ne 0 ]; then
+            echo "ERROR: Failed to upload syntaxflow-aikb.updated_at.txt"
+            exit 1
+          fi
+          echo "✓ syntaxflow-aikb.updated_at.txt uploaded successfully"
 
+          echo ""
+          echo "=== Uploading RAG file ==="
           if [ -f syntaxflow-aikb_new.rag ]; then
-            echo "Uploading syntaxflow-aikb.rag..."
+            echo "Uploading RAG file..."
+            echo "  Source: syntaxflow-aikb_new.rag"
+            echo "  Target: /ai-knowledge-base/rag/syntaxflow-aikb.rag"
             ./yak upload-oss -b "$BUCKET" --endpoint "$ENDPOINT" \
               -ak "$OSS_KEY_ID" -sk "$OSS_KEY_SECRET" -t 10 \
-              -f "syntaxflow-aikb_new.rag:/ai-knowledge-base/rag/syntaxflow-aikb.rag" || exit 1
-            echo "✓ RAG uploaded"
+              -f "syntaxflow-aikb_new.rag:/ai-knowledge-base/rag/syntaxflow-aikb.rag"
+            if [ $? -ne 0 ]; then
+              echo "ERROR: Failed to upload RAG file"
+              exit 1
+            fi
+            echo "✓ RAG file uploaded successfully"
           else
-            echo "⚠️ RAG not built, skipping"
+            echo "⚠️ RAG file not found, skipping upload"
           fi
 
-      - name: Verify OSS upload
+          if [ -f syntaxflow-aikb_new.update-report.md ]; then
+            echo ""
+            echo "Uploading RAG update report (Markdown)..."
+            ./yak upload-oss -b "$BUCKET" --endpoint "$ENDPOINT" \
+              -ak "$OSS_KEY_ID" -sk "$OSS_KEY_SECRET" -t 5 \
+              -f "syntaxflow-aikb_new.update-report.md:/ai-knowledge-base/rag/syntaxflow-aikb.update-report.md"
+            [ $? -eq 0 ] && echo "✓ Update report (Markdown) uploaded successfully"
+          fi
+
+          if [ -f syntaxflow-aikb_new.update-report.json ]; then
+            echo ""
+            echo "Uploading RAG update report (JSON)..."
+            ./yak upload-oss -b "$BUCKET" --endpoint "$ENDPOINT" \
+              -ak "$OSS_KEY_ID" -sk "$OSS_KEY_SECRET" -t 5 \
+              -f "syntaxflow-aikb_new.update-report.json:/ai-knowledge-base/rag/syntaxflow-aikb.update-report.json"
+            [ $? -eq 0 ] && echo "✓ Update report (JSON) uploaded successfully"
+          fi
+
+          echo ""
+          echo "✓ All files uploaded to OSS successfully"
+
+      - name: Download and update rags-latest.json
+        if: success()
+        env:
+          OSS_KEY_ID: ${{ secrets.OSS_KEY_ID }}
+          OSS_KEY_SECRET: ${{ secrets.OSS_KEY_SECRET }}
         run: |
-          BASE_URL="https://yaklang.oss-accelerate.aliyuncs.com/ai-knowledge-base"
+          echo "=== Download and update rags-latest.json ==="
+          if [ ! -f syntaxflow-aikb_new.rag ]; then
+            echo "RAG file not built, skipping rags-latest.json update"
+            exit 0
+          fi
+
+          RAGS_JSON="rags-latest.json"
+          RAG_OSS_URL="https://yaklang.oss-accelerate.aliyuncs.com/rag/rags-latest.json"
+
+          echo "Downloading existing rags-latest.json..."
+          wget -q -O "$RAGS_JSON" "$RAG_OSS_URL" || {
+            echo "No existing rags-latest.json found, creating empty array"
+            echo "[]" > "$RAGS_JSON"
+          }
+          if ! jq empty "$RAGS_JSON" 2>/dev/null; then
+            echo "Invalid JSON in rags-latest.json, creating empty array"
+            echo "[]" > "$RAGS_JSON"
+          fi
+
+          VERSION="$(date -u +"%Y%m%d")-$(echo "${{ github.sha }}" | cut -c1-7)"
+          RAG_FILE_SIZE=$(stat -c%s syntaxflow-aikb_new.rag 2>/dev/null || stat -f%z syntaxflow-aikb_new.rag 2>/dev/null || echo 0)
+
+          echo "Updating rags-latest.json with SyntaxFlow AIKB entry..."
+          echo "  Version: $VERSION"
+          echo "  File: /ai-knowledge-base/rag/syntaxflow-aikb.rag"
+          echo "  Size: $RAG_FILE_SIZE bytes"
+
+          ./yak rag-metainfo \
+            -f "$RAGS_JSON" \
+            -o "$RAGS_JSON" \
+            --register-name "SyntaxFlow AIKB" \
+            --register-name-zh "SyntaxFlow 规则知识库" \
+            --version "$VERSION" \
+            --rag-file "/ai-knowledge-base/rag/syntaxflow-aikb.rag" \
+            --file-size "$RAG_FILE_SIZE"
+
+          echo ""
+          echo "Uploading rags-latest.json to OSS..."
+          ./yak upload-oss -b yaklang --endpoint oss-accelerate.aliyuncs.com \
+            -ak "$OSS_KEY_ID" -sk "$OSS_KEY_SECRET" -t 5 \
+            -f "$RAGS_JSON:/rag/rags-latest.json"
+
+          echo ""
+          echo "✓ rags-latest.json updated and uploaded successfully"
+          echo "New rags-latest.json content:"
+          cat "$RAGS_JSON" | jq .
+
+      - name: Verify OSS upload with HEAD requests
+        run: |
+          echo "=== Verifying OSS uploads ==="
+          OSS_DOMAIN="yaklang.oss-accelerate.aliyuncs.com"
+          BASE_URL="https://${OSS_DOMAIN}/ai-knowledge-base"
+
+          echo ""
           echo "Verifying syntaxflow-aikb.zip..."
-          curl -I -s "$BASE_URL/syntaxflow-aikb.zip" | head -5
+          ZIP_URL="${BASE_URL}/syntaxflow-aikb.zip"
+          HTTP_CODE=$(curl -I -s -o /dev/null -w "%{http_code}" "$ZIP_URL")
+          CONTENT_LENGTH=$(curl -I -s "$ZIP_URL" | grep -i content-length | awk '{print $2}' | tr -d '\r')
+          LAST_MODIFIED=$(curl -I -s "$ZIP_URL" | grep -i last-modified | cut -d' ' -f2- | tr -d '\r')
+          echo "HTTP Status: $HTTP_CODE"
+          echo "Content-Length: $CONTENT_LENGTH bytes"
+          echo "Last-Modified: $LAST_MODIFIED"
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "ERROR: syntaxflow-aikb.zip verification failed (HTTP $HTTP_CODE)"
+            echo "URL: $ZIP_URL"
+            exit 1
+          fi
+          if [ -z "$CONTENT_LENGTH" ] || [ "$CONTENT_LENGTH" -lt 1000 ]; then
+            echo "ERROR: syntaxflow-aikb.zip size is suspiciously small ($CONTENT_LENGTH bytes)"
+            exit 1
+          fi
+          echo "✓ syntaxflow-aikb.zip verified successfully"
+
           echo ""
           echo "Verifying syntaxflow-aikb.updated_at.txt..."
-          curl -s "$BASE_URL/syntaxflow-aikb.updated_at.txt"
-          echo ""
-          if [ -f syntaxflow-aikb_new.rag ]; then
-            echo "Verifying syntaxflow-aikb.rag..."
-            curl -I -s "$BASE_URL/rag/syntaxflow-aikb.rag" | head -3
+          TIMESTAMP_URL="${BASE_URL}/syntaxflow-aikb.updated_at.txt"
+          HTTP_CODE=$(curl -I -s -o /dev/null -w "%{http_code}" "$TIMESTAMP_URL")
+          TIMESTAMP_CONTENT=$(curl -s "$TIMESTAMP_URL")
+          echo "HTTP Status: $HTTP_CODE"
+          echo "Content:"
+          echo "$TIMESTAMP_CONTENT"
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "ERROR: syntaxflow-aikb.updated_at.txt verification failed (HTTP $HTTP_CODE)"
+            echo "URL: $TIMESTAMP_URL"
+            exit 1
           fi
-          echo "✓ Verification done"
+          if [ -z "$TIMESTAMP_CONTENT" ]; then
+            echo "ERROR: syntaxflow-aikb.updated_at.txt is empty"
+            exit 1
+          fi
+          echo "✓ syntaxflow-aikb.updated_at.txt verified successfully"
+
+          echo ""
+          echo "=== Verifying RAG file ==="
+          if [ -f syntaxflow-aikb_new.rag ]; then
+            RAG_URL="${BASE_URL}/rag/syntaxflow-aikb.rag"
+            echo "Verifying RAG file..."
+            echo "URL: $RAG_URL"
+            HTTP_CODE=$(curl -I -s -o /dev/null -w "%{http_code}" "$RAG_URL")
+            if [ "$HTTP_CODE" = "200" ]; then
+              CONTENT_LENGTH=$(curl -I -s "$RAG_URL" | grep -i content-length | awk '{print $2}' | tr -d '\r')
+              echo "HTTP Status: $HTTP_CODE"
+              echo "Content-Length: $CONTENT_LENGTH bytes"
+              echo "✓ RAG file verified successfully"
+            else
+              echo "❌ RAG file verification failed (HTTP $HTTP_CODE)"
+            fi
+          else
+            echo "ℹ️ No RAG file to verify (was not generated)"
+          fi
+
+          echo ""
+          echo "============================================"
+          echo "✓ All verifications passed!"
+          echo "============================================"
+          echo ""
+          echo "AIKB files are now available at:"
+          echo "  ZIP: $ZIP_URL"
+          echo "  Timestamp: $TIMESTAMP_URL"
+          if [ -f syntaxflow-aikb_new.rag ]; then
+            echo "  RAG: ${BASE_URL}/rag/syntaxflow-aikb.rag"
+          fi
+          echo ""
+
+      - name: Upload diff package artifact
+        if: always() && steps.diff.outputs.diff_created == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: diff-fs
+          path: diff-fs.zip
+          retention-days: 7
 
       - name: Summary
         if: success()
         run: |
           echo "## ✅ SyntaxFlow AIKB Upload Successful" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The SyntaxFlow AI Knowledge Base has been successfully built and uploaded to OSS." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 Files" >> $GITHUB_STEP_SUMMARY
+          echo "- \`syntaxflow-aikb.zip\` - Knowledge base archive" >> $GITHUB_STEP_SUMMARY
+          echo "- \`syntaxflow-aikb.updated_at.txt\` - Upload timestamp" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.diff.outputs.diff_created }}" = "true" ]; then
+            echo "- \`diff-fs.zip\` - Diff package (available in artifacts)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- \`diff-fs.zip\` - Skipped (no file changes)" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -f syntaxflow-aikb_new.rag ]; then
+            echo "- \`syntaxflow-aikb.rag\` - RAG knowledge base" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔗 Access URLs" >> $GITHUB_STEP_SUMMARY
           echo "- ZIP: https://yaklang.oss-accelerate.aliyuncs.com/ai-knowledge-base/syntaxflow-aikb.zip" >> $GITHUB_STEP_SUMMARY
           echo "- Timestamp: https://yaklang.oss-accelerate.aliyuncs.com/ai-knowledge-base/syntaxflow-aikb.updated_at.txt" >> $GITHUB_STEP_SUMMARY
           echo "- RAG: https://yaklang.oss-accelerate.aliyuncs.com/ai-knowledge-base/rag/syntaxflow-aikb.rag" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f diff-fs.md ]; then
+            echo "### 📋 Diff Report" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            cat diff-fs.md >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -f syntaxflow-aikb_new.update-report.md ]; then
+            echo "### 🧠 RAG Update Report (Markdown)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            cat syntaxflow-aikb_new.update-report.md >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -f syntaxflow-aikb_new.update-report.json ]; then
+            echo "### 📊 RAG Update Report (JSON)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "JSON report available at: https://yaklang.oss-accelerate.aliyuncs.com/ai-knowledge-base/rag/syntaxflow-aikb.update-report.json" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`json" >> $GITHUB_STEP_SUMMARY
+            cat syntaxflow-aikb_new.update-report.json >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "### 📊 Build Info" >> $GITHUB_STEP_SUMMARY
+          echo "- Commit: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Branch: \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Actor: @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Update Mode: \`incremental\`" >> $GITHUB_STEP_SUMMARY

@@ -80,6 +80,39 @@ TEXT
 )
 ```
 
+### 第二个 `desc`：测试用例块（可选）
+
+带自动化测试的规则应包含**两个 `desc` 块**：
+
+1. **第一个 `desc`**：仅含元数据（title、type、level、risk、desc、solution、reference 等）
+2. **规则体**：`<include>`、数据流、`alert` 等
+3. **第二个 `desc`**：测试用例，含 `lang`、`alert_high`/`alert_mid`、`'file://xxx': <<<UNSAFE ... UNSAFE`、`'safefile://xxx': <<<SAFE ... SAFE`（可选）
+
+**正确结构示例**（参考 `golang-template-ssti.sf`、`golang-reflected-xss-gin-context.sf`）：
+
+```sf
+desc(title: "...", type: audit, level: high, risk: "...", ...);
+
+<include('...')> as $ctx;
+$ctx.Query(...) #-> as $source;
+... as $sink;
+alert $sink for { message: "...", level: high };
+
+desc(lang: golang, alert_high: 1,
+    'file://unsafe.go': <<<UNSAFE
+package main
+func vuln() { ... }
+UNSAFE
+    ,
+    'safefile://safe.go': <<<SAFE
+package main
+func safe() { ... }
+SAFE
+);
+```
+
+**注意**：`file://` 和 `safefile://` 必须放在**第二个、末尾的 `desc()`** 中，不可与第一个元数据 `desc()` 混在一起。
+
 ## 编写审计语句
 
 在代码审计过程中，找到特定变量和方法的调用位置是识别潜在漏洞的关键步骤。
