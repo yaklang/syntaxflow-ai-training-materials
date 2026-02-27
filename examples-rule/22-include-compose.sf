@@ -1,0 +1,18 @@
+// Cookbook: include 组合规则 - Servlet & Spring 命令注入
+desc(
+	title: "Servlet & Springframework 基础参数命令注入",
+	type: vuln,
+	risk: rce,
+)
+
+<include('java-servlet-param')> as $source;
+<include('java-spring-param')> as $source;
+<include('java-runtime-exec-sink')> as $sink;
+$sink #{
+	include: `<self> & $source`,
+	exclude: `<self>?{opcode:call}?{!<self> & $source}`
+}-> as $high;
+alert $high for {
+	message: "发现Java代码中存在命令注入漏洞",
+	level: high,
+};

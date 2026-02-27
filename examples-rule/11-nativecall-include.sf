@@ -1,0 +1,9 @@
+// Syntax: <include('lib-name')> 规则复用
+// Cookbook: lib 与 include
+desc(
+	title: "include example",
+	type: audit,
+	lib: "example-source"
+)
+* as $output;
+alert $output;

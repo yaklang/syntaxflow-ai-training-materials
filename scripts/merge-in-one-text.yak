@@ -1,0 +1,79 @@
+#!/usr/bin/env yak
+
+// =============================================================================
+// SyntaxFlow AIKB 文档打包工具 - Merge docs into one ZIP
+// 功能: 将 basic-syntax、practice、rule-examples、examples-rule 下的 .md 和 .sf 打包为 ZIP
+// 用途: 用于训练或增量更新 RAG 知识库
+//
+// 使用示例:
+//   cd yaklang && yak syntaxflow-aikb/scripts/merge-in-one-text.yak --output syntaxflow-aikb.zip
+//   cd syntaxflow-aikb && yak scripts/merge-in-one-text.yak --output syntaxflow-aikb.zip
+// =============================================================================
+
+__DESC__ = "Merge SyntaxFlow AIKB docs (.md, .sf) into ZIP for training or incremental update"
+
+outputPath = cli.String("output", cli.setVerboseName("输出路径"), cli.setDefault("syntaxflow-aikb.zip"), cli.setHelp("Output ZIP file path"))
+baseDir = cli.String("base", cli.setVerboseName("知识库根目录"), cli.setDefault("."), cli.setHelp("Base dir of syntaxflow-aikb (default: current dir or parent)"))
+cli.check()
+
+// 确定 base 目录
+if baseDir == "." {
+    // 尝试 syntaxflow-aikb 子目录（从 yaklang 根运行）
+    if file.IsExisted("syntaxflow-aikb") {
+        baseDir = "syntaxflow-aikb"
+    }
+}
+
+log.Info("Base directory: %s", baseDir)
+
+targetFolders = ["basic-syntax", "practice", "rule-examples", "examples-rule"]
+
+zipMaterial = {}
+for folder in targetFolders {
+    dirPath = file.Join(baseDir, folder)
+    if !file.IsExisted(dirPath) {
+        log.Warn("Skip non-existent folder: %s", dirPath)
+        continue
+    }
+    file.Walk(dirPath, info => {
+        if info.IsDir {
+            return true
+        }
+        path = info.Path
+        if !str.HasSuffix(path, ".md") && !str.HasSuffix(path, ".sf") {
+            return true
+        }
+        content = file.ReadFile(path)~
+        if content == nil || content == "" {
+            return true
+        }
+        relPath = folder + "/" + file.GetBase(path)
+        normPath = str.ReplaceAll(path, "\\", "/")
+        parts = str.Split(normPath, "syntaxflow-aikb/")
+        if len(parts) >= 2 {
+            relPath = str.Trim(parts[1], "/")
+        } else {
+            normDir = str.ReplaceAll(dirPath, "\\", "/")
+            subpath = str.TrimPrefix(normPath, normDir)
+            subpath = str.Trim(subpath, "/")
+            if subpath != "" {
+                relPath = folder + "/" + subpath
+            }
+        }
+        zipMaterial[relPath] = content
+        log.Info("  + %s", relPath)
+        return true
+    })~
+}
+
+log.Info("Found %d files to pack", len(zipMaterial))
+
+finalOutput = outputPath
+if !str.HasSuffix(finalOutput, ".zip") {
+    finalOutput = finalOutput + ".zip"
+}
+
+raw = zip.CompressRaw(zipMaterial)~
+file.Save(finalOutput, raw)
+
+log.Info("ZIP created: %s (%d files)", finalOutput, len(zipMaterial))

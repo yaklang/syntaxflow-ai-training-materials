@@ -1,0 +1,7 @@
+// Syntax: ... 递归链式调用
+// Cookbook: DocumentBuilderFactory...parse() 等价于完整链
+desc(title: "recursive chain")
+
+DocumentBuilderFactory...parse() as $parse;
+DocumentBuilderFactory...parse(* as $source);
+check $parse then "found" else "none";

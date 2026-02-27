@@ -1,0 +1,9 @@
+// Syntax: 数据流配置 - include, exclude, until, depth
+// Cookbook: -{depth:5}->, #{until:* & $source}->
+desc(title: "dataflow config")
+
+<include('java-spring-param')> as $source;
+<include('java-runtime-exec-sink')> as $sink;
+$sink #{depth: 5}-> * as $depthLimited;
+$sink #{until: "* & $source"}-> as $controlled;
+check $controlled then "found" else "none";

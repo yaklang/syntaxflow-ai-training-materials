@@ -1,0 +1,11 @@
+// Syntax: 词法与符号搜索 - 变量名、方法名
+// Cookbook: 从变量名方法名开始审计
+// 1. 搜索变量名: documentBuilder
+// 2. 搜索方法: .parse
+// 3. 结合: documentBuilder.parse
+desc(title: "search variable and method")
+
+documentBuilder as $var;
+.parse as $method;
+documentBuilder.parse as $combined;
+check $combined then "found" else "not found";

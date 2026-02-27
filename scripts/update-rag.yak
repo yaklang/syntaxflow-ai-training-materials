@@ -1,0 +1,106 @@
+#!/usr/bin/env yak
+
+// =============================================================================
+// SyntaxFlow AIKB 增量 RAG 更新工具
+// 功能: 基于现有 RAG + 差异 ZIP 包，增量添加/更新知识条目
+// 用途: 当文档有变更时，仅处理变更文件，节省 AI 调用成本
+//
+// 使用示例:
+//   yak scripts/update-rag.yak --rag-file old.rag --diff-zip syntaxflow-aikb.zip --output new.rag
+//
+// 注意: 若 diff-zip 中包含已修改的 .md，会新增条目（可能产生重复，建议定期全量重建）
+// =============================================================================
+
+__DESC__ = "Incremental RAG update from existing .rag + diff ZIP"
+
+yakit.AutoInitYakit()
+
+ragFile = cli.String("rag-file", cli.setVerboseName("现有RAG文件"), cli.setRequired(true), cli.setHelp("Existing RAG file path"))
+diffZip = cli.String("diff-zip", cli.setVerboseName("差异ZIP包"), cli.setRequired(true), cli.setHelp("ZIP with changed .md/.sf files"))
+outputPath = cli.String("output", cli.setVerboseName("输出路径"), cli.setRequired(true), cli.setHelp("Output RAG file path"))
+maxConcurrency = cli.Int("concurrency", cli.setDefault(3), cli.setHelp("Max concurrent tasks"))
+aiType = cli.String("ai-type", cli.setDefault(""), cli.setHelp("AI service type"))
+aiModel = cli.String("ai-model", cli.setDefault(""), cli.setHelp("AI model name"))
+cli.check()
+
+if !file.IsExisted(ragFile) {
+    die("RAG file not found: %s" % ragFile)
+}
+if !file.IsExisted(diffZip) {
+    die("Diff ZIP not found: %s" % diffZip)
+}
+
+log.Info("=== SyntaxFlow AIKB Incremental Update ===")
+log.Info("RAG: %s", ragFile)
+log.Info("Diff ZIP: %s", diffZip)
+log.Info("Output: %s", outputPath)
+
+ragCollectionName = "yaklang-syntaxflow-aikb"
+rag.DeleteCollection(ragCollectionName)
+
+log.Info("Importing existing RAG...")
+err = rag.Import(ragFile, rag.importName(ragCollectionName))
+if err != nil {
+    die("Import failed: %v" % err)
+}
+
+// 从 ZIP 收集 .md 文件路径
+mdPaths = []
+zip.Recursive(diffZip, (isDir, pathName, info) => {
+    if isDir || !str.HasSuffix(pathName, ".md") {
+        return nil
+    }
+    mdPaths = append(mdPaths, pathName)
+    return nil
+})~
+
+// 提取内容
+mdFiles = []
+for pathName in mdPaths {
+    content = zip.ExtractFile(diffZip, pathName)~
+    if content != nil && content != "" {
+        mdFiles = append(mdFiles, {"path": pathName, "content": content})
+    }
+}
+
+log.Info("Found %d .md files in diff ZIP", len(mdFiles))
+if len(mdFiles) == 0 {
+    log.Info("No md files to process, exporting...")
+    rag.Export(ragCollectionName, outputPath)~
+    log.Info("Done: %s", outputPath)
+    return
+}
+
+sfExtraPrompt = `
+【SyntaxFlow 知识库搜索场景说明】
+这是 SyntaxFlow 静态分析语言的文档内容。生成检索问题时关注：语法查询、规则编写、dataflow、NativeCall、desc/check/alert 等。
+`
+
+successCount = 0
+failedCount = 0
+for item in mdFiles {
+    pathName = item["path"]
+    content = item["content"]
+    title = "syntaxflow-aikb/" + str.ReplaceAll(pathName, "\\", "/")
+    try {
+        ragOpts = [rag.extraPrompt(sfExtraPrompt), rag.setSearchMeta("SyntaxFlow文档", title), rag.noPotentialQuestions()]
+        if aiType != "" && aiModel != "" {
+            ragOpts = append(ragOpts, rag.aiServiceType(aiType, ai.model(aiModel)))
+        }
+        _, err = rag.BuildSearchIndexKnowledge(ragCollectionName, content, ragOpts...)
+        if err != nil {
+            log.Warn("Failed %s: %v", pathName, err)
+            failedCount++
+        } else {
+            log.Info("  + %s", pathName)
+            successCount++
+        }
+    } catch e {
+        log.Warn("Error %s: %v", pathName, e)
+        failedCount++
+    }
+}
+
+log.Info("Exporting to %s...", outputPath)
+rag.Export(ragCollectionName, outputPath)~
+log.Info("Done. Success: %d, Failed: %d", successCount, failedCount)

@@ -1,0 +1,133 @@
+// =============================================================================
+// 检查线上 SyntaxFlow AIKB 状态
+// =============================================================================
+// 本脚本用于检查 OSS 上的 SyntaxFlow AIKB 文件状态
+// 关键词: SyntaxFlow AIKB检查, OSS验证, 在线状态, 文件验证
+// =============================================================================
+
+println("=" * 80)
+println("检查线上 SyntaxFlow AIKB 状态")
+println("=" * 80)
+
+// OSS 配置 (与 bin_cfg.yml 中 syntaxflow-aikb 路径一致)
+ossDomain = "oss-qn.yaklang.com"
+baseUrl = sprintf("https://%v/ai-knowledge-base", ossDomain)
+zipUrl = sprintf("%v/syntaxflow-aikb.zip", baseUrl)
+timestampUrl = sprintf("%v/syntaxflow-aikb.updated_at.txt", baseUrl)
+ragUrl = sprintf("%v/rag/syntaxflow-aikb.rag", baseUrl)
+
+println(sprintf("\nOSS 域名: %v", ossDomain))
+println(sprintf("基础路径: %v", baseUrl))
+
+// =============================================================================
+// 1. 检查 ZIP 文件
+// =============================================================================
+println("\n[1/3] 检查 syntaxflow-aikb.zip...")
+println(sprintf("URL: %v", zipUrl))
+
+rsp, err = http.Head(zipUrl)~
+if err != nil {
+    yakit.Error(sprintf("HTTP HEAD 请求失败: %v", err))
+    die("无法连接到 OSS")
+}
+
+println(sprintf("\nHTTP 状态码: %v", rsp.StatusCode))
+
+if rsp.StatusCode == 200 {
+    yakit.Success("✓ ZIP 文件存在")
+    contentLength = rsp.Header.Get("Content-Length")
+    lastModified = rsp.Header.Get("Last-Modified")
+    if contentLength != "" {
+        sizeBytes = parseInt(contentLength)~
+        sizeMB = float(sizeBytes) / 1024 / 1024
+        println(sprintf("文件大小: %v bytes (%.2f MB)", contentLength, sizeMB))
+    }
+    if lastModified != "" {
+        println(sprintf("最后修改: %v", lastModified))
+    }
+} else if rsp.StatusCode == 404 {
+    yakit.Error("✗ ZIP 文件不存在 (404)")
+} else {
+    yakit.Warn(sprintf("✗ 意外的状态码: %v", rsp.StatusCode))
+}
+
+// =============================================================================
+// 2. 检查时间戳文件
+// =============================================================================
+println("\n[2/3] 检查 syntaxflow-aikb.updated_at.txt...")
+println(sprintf("URL: %v", timestampUrl))
+
+rsp2, err = http.Get(timestampUrl)~
+if err != nil {
+    yakit.Error(sprintf("HTTP GET 请求失败: %v", err))
+} else {
+    println(sprintf("\nHTTP 状态码: %v", rsp2.StatusCode))
+    if rsp2.StatusCode == 200 {
+        yakit.Success("✓ 时间戳文件存在")
+        body = rsp2.Body~
+        content = string(body)
+        println("\n时间戳文件内容:")
+        println("-" * 60)
+        println(content)
+        println("-" * 60)
+        lines = str.Split(content, "\n")
+        for line in lines {
+            if str.HasPrefix(line, "Upload Time:") {
+                uploadTime = str.TrimSpace(str.TrimPrefix(line, "Upload Time:"))
+                yakit.Info(sprintf("上传时间: %v", uploadTime))
+            } else if str.HasPrefix(line, "Commit:") {
+                commit = str.TrimSpace(str.TrimPrefix(line, "Commit:"))
+                yakit.Info(sprintf("提交信息: %v", commit))
+            }
+        }
+    } else if rsp2.StatusCode == 404 {
+        yakit.Error("✗ 时间戳文件不存在 (404)")
+    } else {
+        yakit.Warn(sprintf("✗ 意外的状态码: %v", rsp2.StatusCode))
+    }
+}
+
+// =============================================================================
+// 3. 检查 RAG 文件
+// =============================================================================
+println("\n[3/3] 检查 syntaxflow-aikb.rag...")
+println(sprintf("URL: %v", ragUrl))
+
+rsp3, err = http.Head(ragUrl)~
+if err != nil {
+    yakit.Error(sprintf("HTTP HEAD 请求失败: %v", err))
+} else {
+    println(sprintf("\nHTTP 状态码: %v", rsp3.StatusCode))
+    if rsp3.StatusCode == 200 {
+        yakit.Success("✓ RAG 文件存在")
+        contentLength = rsp3.Header.Get("Content-Length")
+        if contentLength != "" {
+            sizeBytes = parseInt(contentLength)~
+            sizeMB = float(sizeBytes) / 1024 / 1024
+            println(sprintf("文件大小: %v bytes (%.2f MB)", contentLength, sizeMB))
+        }
+    } else if rsp3.StatusCode == 404 {
+        yakit.Warn("✗ RAG 文件不存在 (404) - 可能尚未构建")
+    } else {
+        yakit.Warn(sprintf("✗ 意外的状态码: %v", rsp3.StatusCode))
+    }
+}
+
+// =============================================================================
+// 总结
+// =============================================================================
+println("\n" + "=" * 80)
+println("检查完成")
+println("=" * 80)
+
+println("\n访问地址:")
+println(sprintf("  ZIP: %v", zipUrl))
+println(sprintf("  时间戳: %v", timestampUrl))
+println(sprintf("  RAG: %v", ragUrl))
+
+println("\n相关配置:")
+println("  配置文件: yaklang/common/thirdparty_bin/bin_cfg.yml")
+println("  配置项: syntaxflow-aikb, syntaxflow-aikb-rag")
+
+println("")
+yakit.Success("检查完成！")

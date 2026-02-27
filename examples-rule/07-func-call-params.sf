@@ -1,0 +1,8 @@
+// Syntax: 函数调用参数审计 - .parse(* as $source), .parse(* as $arg,)
+// Cookbook: 作为函数调用审计
+desc(title: "function call params")
+
+DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(* as $source);
+Runtime.getRuntime().exec(* as $cmd);
+.loadData(* as $data,);
+check $source then "found" else "none";

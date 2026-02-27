@@ -1,0 +1,165 @@
+name: Upload SyntaxFlow AIKB to OSS
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'awesome-rule/**'
+      - 'basic-syntax/**'
+      - 'examples-rule/**'
+      - 'practice/**'
+      - 'rule-examples/**'
+      - 'scripts/**'
+      - '.github/workflows/upload-aikb.yml'
+
+  workflow_dispatch:
+
+concurrency:
+  group: upload-syntaxflow-aikb
+  cancel-in-progress: false
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Print trigger information
+        run: |
+          echo "============================================"
+          echo "SyntaxFlow AIKB Upload"
+          echo "Workflow triggered by: ${{ github.event_name }}"
+          echo "Branch: ${{ github.ref }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Actor: ${{ github.actor }}"
+          echo "============================================"
+
+      - name: Download Yaklang Engine
+        run: |
+          echo "=== Downloading Yaklang Engine ==="
+          YAK_VERSION="1.4.5-beta5"
+          YAK_URL="https://yaklang.oss-accelerate.aliyuncs.com/yak/${YAK_VERSION}/yak_linux_amd64"
+          wget -q --show-progress -O ./yak "$YAK_URL"
+          chmod +x ./yak
+          ./yak version || true
+          echo "✓ Yaklang engine downloaded"
+
+      - name: Generate SyntaxFlow AIKB ZIP file
+        run: |
+          echo "=== Generating syntaxflow-aikb.zip ==="
+          OLD_ZIP_URL="https://yaklang.oss-accelerate.aliyuncs.com/ai-knowledge-base/syntaxflow-aikb.zip"
+          if curl -s -o syntaxflow-aikb-old.zip "$OLD_ZIP_URL"; then
+            echo "✓ Existing ZIP downloaded for diff"
+            ls -lh syntaxflow-aikb-old.zip
+          else
+            echo "⚠️ No existing ZIP (first upload)"
+          fi
+
+          ./yak scripts/merge-in-one-text.yak --base . --output syntaxflow-aikb.zip
+          if [ ! -f syntaxflow-aikb.zip ]; then
+            echo "ERROR: Failed to generate syntaxflow-aikb.zip"
+            exit 1
+          fi
+          ls -lh syntaxflow-aikb.zip
+          unzip -l syntaxflow-aikb.zip | head -25
+          echo "✓ ZIP generated"
+
+      - name: Build SyntaxFlow AIKB RAG
+        continue-on-error: true
+        env:
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          AI_API_MODEL: ${{ secrets.AI_API_MODEL }}
+          AI_API_DOMAIN: ${{ secrets.AI_API_DOMAIN }}
+        run: |
+          echo "=== Building syntaxflow-aikb.rag ==="
+          RAG_URL="https://yaklang.oss-accelerate.aliyuncs.com/ai-knowledge-base/rag/syntaxflow-aikb.rag"
+          if curl -f -s -o syntaxflow-aikb_old.rag "$RAG_URL"; then
+            echo "✓ Downloaded existing RAG for incremental"
+          else
+            echo "⚠️ No existing RAG, full rebuild"
+          fi
+
+          ./yak scripts/build-syntaxflow-aikb-rag.yak \
+            --base . \
+            --output syntaxflow-aikb_new.rag \
+            --concurrency 5
+          if [ -f syntaxflow-aikb_new.rag ]; then
+            echo "✓ RAG built"
+            ls -lh syntaxflow-aikb_new.rag
+          else
+            echo "⚠️ RAG build failed (ZIP will still upload)"
+          fi
+
+      - name: Create upload timestamp file
+        run: |
+          UPLOAD_TIME=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          COMMIT_SHA="${{ github.sha }}"
+          COMMIT_SHORT="${COMMIT_SHA:0:7}"
+          echo "Upload Time: $UPLOAD_TIME" > syntaxflow-aikb.updated_at.txt
+          echo "Commit: $COMMIT_SHORT ($COMMIT_SHA)" >> syntaxflow-aikb.updated_at.txt
+          echo "Branch: ${{ github.ref_name }}" >> syntaxflow-aikb.updated_at.txt
+          echo "Actor: ${{ github.actor }}" >> syntaxflow-aikb.updated_at.txt
+          echo "Workflow Run: ${{ github.run_number }}" >> syntaxflow-aikb.updated_at.txt
+          cat syntaxflow-aikb.updated_at.txt
+
+      - name: Upload files to OSS
+        env:
+          OSS_KEY_ID: ${{ secrets.OSS_KEY_ID }}
+          OSS_KEY_SECRET: ${{ secrets.OSS_KEY_SECRET }}
+        run: |
+          if [ -z "$OSS_KEY_ID" ] || [ -z "$OSS_KEY_SECRET" ]; then
+            echo "ERROR: OSS_KEY_ID / OSS_KEY_SECRET not set"
+            exit 1
+          fi
+          BUCKET="yaklang"
+          ENDPOINT="oss-accelerate.aliyuncs.com"
+
+          echo "Uploading syntaxflow-aikb.zip..."
+          ./yak upload-oss -b "$BUCKET" --endpoint "$ENDPOINT" \
+            -ak "$OSS_KEY_ID" -sk "$OSS_KEY_SECRET" -t 10 \
+            -f "syntaxflow-aikb.zip:/ai-knowledge-base/syntaxflow-aikb.zip" || exit 1
+          echo "✓ ZIP uploaded"
+
+          echo "Uploading syntaxflow-aikb.updated_at.txt..."
+          ./yak upload-oss -b "$BUCKET" --endpoint "$ENDPOINT" \
+            -ak "$OSS_KEY_ID" -sk "$OSS_KEY_SECRET" -t 5 \
+            -f "syntaxflow-aikb.updated_at.txt:/ai-knowledge-base/syntaxflow-aikb.updated_at.txt" || exit 1
+          echo "✓ Timestamp uploaded"
+
+          if [ -f syntaxflow-aikb_new.rag ]; then
+            echo "Uploading syntaxflow-aikb.rag..."
+            ./yak upload-oss -b "$BUCKET" --endpoint "$ENDPOINT" \
+              -ak "$OSS_KEY_ID" -sk "$OSS_KEY_SECRET" -t 10 \
+              -f "syntaxflow-aikb_new.rag:/ai-knowledge-base/rag/syntaxflow-aikb.rag" || exit 1
+            echo "✓ RAG uploaded"
+          else
+            echo "⚠️ RAG not built, skipping"
+          fi
+
+      - name: Verify OSS upload
+        run: |
+          BASE_URL="https://yaklang.oss-accelerate.aliyuncs.com/ai-knowledge-base"
+          echo "Verifying syntaxflow-aikb.zip..."
+          curl -I -s "$BASE_URL/syntaxflow-aikb.zip" | head -5
+          echo ""
+          echo "Verifying syntaxflow-aikb.updated_at.txt..."
+          curl -s "$BASE_URL/syntaxflow-aikb.updated_at.txt"
+          echo ""
+          if [ -f syntaxflow-aikb_new.rag ]; then
+            echo "Verifying syntaxflow-aikb.rag..."
+            curl -I -s "$BASE_URL/rag/syntaxflow-aikb.rag" | head -3
+          fi
+          echo "✓ Verification done"
+
+      - name: Summary
+        if: success()
+        run: |
+          echo "## ✅ SyntaxFlow AIKB Upload Successful" >> $GITHUB_STEP_SUMMARY
+          echo "- ZIP: https://yaklang.oss-accelerate.aliyuncs.com/ai-knowledge-base/syntaxflow-aikb.zip" >> $GITHUB_STEP_SUMMARY
+          echo "- Timestamp: https://yaklang.oss-accelerate.aliyuncs.com/ai-knowledge-base/syntaxflow-aikb.updated_at.txt" >> $GITHUB_STEP_SUMMARY
+          echo "- RAG: https://yaklang.oss-accelerate.aliyuncs.com/ai-knowledge-base/rag/syntaxflow-aikb.rag" >> $GITHUB_STEP_SUMMARY

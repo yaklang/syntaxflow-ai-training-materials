@@ -1,0 +1,8 @@
+// Syntax: ?{} 条件过滤 - opcode, have, version_in, !, &&, ||
+// Cookbook: 分析值筛选过滤
+desc(title: "filter condition")
+
+DocumentBuilderFactory.newInstance() as $factories;
+$factories?{!((.setFeature) || (.setXIncludeAware) || (.setExpandEntityReferences))} as $entry;
+$entry.*Builder().parse(* #-> as $source);
+check $source then "XXE Attack" else "XXE Safe";

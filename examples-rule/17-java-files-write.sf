@@ -1,0 +1,10 @@
+// Cookbook: 本地文件写入检测
+desc(title: "local file write")
+
+Files.write(, * #-> as $params) as $sink;
+$params?{.getBytes()} as $source;
+check $source then "Local Files Writer" else "No Files Written";
+alert $source for {
+	message: "Local Files Write Detected",
+	level: info,
+};

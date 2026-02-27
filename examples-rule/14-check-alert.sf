@@ -1,0 +1,12 @@
+// Syntax: check, alert
+// Cookbook: 规则输出
+desc(title: "check and alert")
+
+ProcessBuilder(* as $cmd) as $builder;
+$builder.start() as $execBuilder;
+check $execBuilder then "fine" else "rce error";
+alert $execBuilder for {
+	message: "发现潜在的远程代码执行漏洞",
+	risk: rce,
+	level: high,
+};

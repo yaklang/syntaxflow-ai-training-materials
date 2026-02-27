@@ -1,0 +1,10 @@
+// Cookbook: PHP SQL 注入 + dataflow 过滤 mysqli_real_escape_string
+desc(title: "sql-injection-unsanitized")
+
+_GET.* as $params;
+$params --> * as $sink;
+$sink<dataflow(<<<CODE
+*?{opcode: call && <getCaller><name>?{have: mysqli_real_escape_string}} as $__next__
+CODE)> as $filtered;
+$sink - $filtered as $vuln;
+alert $vuln;

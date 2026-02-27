@@ -1,0 +1,9 @@
+// Syntax: Use-Def 链 ->, -->, #>, #->, -{depth:5}->
+// Cookbook: 追踪使用链和定义链
+desc(title: "dataflow usdef")
+
+ProcessBuilder(* as $cmd) as $builder;
+$builder.start() as $execBuilder;
+$cmd #-> * as $target;
+$execBuilder -{depth: 3}-> * as $sink;
+check $target then "fine" else "not found";

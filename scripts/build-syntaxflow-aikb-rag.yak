@@ -1,0 +1,256 @@
+#!/usr/bin/env yak
+
+// =============================================================================
+// SyntaxFlow AIKB RAG 索引构建工具
+// 功能: 从 basic-syntax、practice、rule-examples 的 .md 构建 RAG 语义索引
+// 用途: 为 SyntaxFlow 文档构建可搜索的问题索引，支持 RAG 语义检索
+//
+// 使用示例:
+//   cd yaklang && yak syntaxflow-aikb/scripts/build-syntaxflow-aikb-rag.yak --output syntaxflow-aikb.rag
+//   cd syntaxflow-aikb && yak scripts/build-syntaxflow-aikb-rag.yak --output syntaxflow-aikb.rag
+// =============================================================================
+
+__DESC__ = "Build SyntaxFlow AIKB RAG index from .md docs using BuildSearchIndexKnowledge"
+
+yakit.AutoInitYakit()
+
+outputRagPath = cli.String("output", cli.setVerboseName("输出路径"), cli.setDefault("syntaxflow-aikb.rag"), cli.setHelp("Output RAG file path"))
+baseDir = cli.String("base", cli.setVerboseName("知识库根目录"), cli.setDefault("."), cli.setHelp("Base dir of syntaxflow-aikb"))
+maxConcurrency = cli.Int("concurrency", cli.setDefault(3), cli.setHelp("Max concurrent tasks"))
+forceRebuild = cli.Bool("force", cli.setVerboseName("强制重建"), cli.setDefault(false), cli.setHelp("Force rebuild, ignore existing RAG"))
+aiType = cli.String("ai-type", cli.setDefault(""), cli.setHelp("AI service type (e.g. aibalance, openai)"))
+aiModel = cli.String("ai-model", cli.setDefault(""), cli.setHelp("AI model name"))
+testLimit = cli.Int("limit", cli.setDefault(0), cli.setHelp("Limit md files to process (0=all, for testing use 5)"))
+cli.check()
+
+yakVersion = YAK_VERSION || "dev"
+log.Info("=== SyntaxFlow AIKB RAG Builder ===")
+log.Info("Yak Version: %s", yakVersion)
+
+finalOutputPath = outputRagPath
+if !str.HasSuffix(finalOutputPath, ".rag") {
+    finalOutputPath = finalOutputPath + ".rag"
+}
+
+if baseDir == "." {
+    if file.IsExisted("syntaxflow-aikb") {
+        baseDir = "syntaxflow-aikb"
+    }
+}
+
+log.Info("Output RAG: %s", finalOutputPath)
+log.Info("Base dir: %s", baseDir)
+log.Info("Concurrency: %d", maxConcurrency)
+
+ragCollectionName = "yaklang-syntaxflow-aikb"
+existingRagFile = file.IsExisted(finalOutputPath)
+incrementalMode = existingRagFile && !forceRebuild
+
+if incrementalMode {
+    log.Info("=== Incremental Update Mode ===")
+    rag.DeleteCollection(ragCollectionName)
+    try {
+        err = rag.Import(finalOutputPath, rag.importName(ragCollectionName))
+        if err != nil {
+            log.Warn("Import failed: %v, fallback to full rebuild", err)
+            incrementalMode = false
+            rag.DeleteCollection(ragCollectionName)
+        } else {
+            log.Info("Imported existing RAG")
+        }
+    } catch e {
+        incrementalMode = false
+        rag.DeleteCollection(ragCollectionName)
+    }
+} else {
+    log.Info("=== Full Build Mode ===")
+    rag.DeleteCollection(ragCollectionName)
+}
+
+ragSystem, err = rag.Get(ragCollectionName)
+if err != nil {
+    die(sprintf("Init RAG failed: %v", err))
+}
+
+existingKnowledgeTitles = {}
+preloadExistingKnowledge = func() {
+    if !incrementalMode {
+        return
+    }
+    titles, err = rag.DBQueryUniqueKnowledgeTitles(rag.dbQueryCollection(ragCollectionName), rag.dbQueryLimit(50000))
+    if err != nil {
+        return
+    }
+    for _, t in titles {
+        if t != "" {
+            existingKnowledgeTitles[t] = true
+        }
+    }
+    log.Info("Preloaded %d existing titles", len(existingKnowledgeTitles))
+}
+
+checkExists = func(title) {
+    return incrementalMode && (title in existingKnowledgeTitles)
+}
+
+if incrementalMode {
+    preloadExistingKnowledge()
+}
+
+// 收集 .md 和 .sf 文件（.sf 可执行规则提高检索权重）
+targetFolders = ["basic-syntax", "practice", "rule-examples", "examples-rule"]
+allItems = []
+for folder in targetFolders {
+    dirPath = file.Join(baseDir, folder)
+    if !file.IsExisted(dirPath) {
+        continue
+    }
+        file.Walk(dirPath, info => {
+        if info.IsDir {
+            return true
+        }
+        path = info.Path
+        isMd = str.HasSuffix(path, ".md")
+        isSf = str.HasSuffix(path, ".sf")
+        if !isMd && !isSf {
+            return true
+        }
+        subpath = str.TrimPrefix(path, dirPath)
+        subpath = str.Trim(subpath, "/\\")
+        relPath = subpath != "" ? folder + "/" + subpath : folder + "/" + file.GetBase(path)
+        relPath = str.ReplaceAll(relPath, "\\", "/")
+        title = "syntaxflow-aikb/" + relPath
+        if checkExists(title) {
+            return true
+        }
+        content = file.ReadFile(path)~
+        if content == nil || content == "" {
+            return true
+        }
+        allItems = append(allItems, {"path": path, "relPath": relPath, "title": title, "content": content, "isSf": isSf})
+        return true
+    })~
+    if testLimit > 0 && len(allItems) >= testLimit {
+        break
+    }
+}
+
+log.Info("Found %d md files to process", len(allItems))
+if len(allItems) == 0 {
+    if incrementalMode {
+        log.Info("All indexed, exporting...")
+        rag.Export(ragCollectionName, finalOutputPath)~
+        os.Exit(0)
+    }
+    die("No md files found")
+}
+
+// SyntaxFlow 场景 extraPrompt（.md 文档）
+sfExtraPrompt = `
+【SyntaxFlow 知识库搜索场景说明】
+这是 SyntaxFlow 静态分析语言的文档内容，用于安全代码分析、规则编写、SSA 查询等场景。
+
+生成问题时，请特别关注：
+1. 用户可能用什么自然语言描述来找到这段文档？（如："怎么用 dataflow 追踪数据" → 数据流相关）
+2. 用户可能遇到什么 SyntaxFlow 相关问题？（如："#-> 和 --> 有什么区别"）
+3. 规则编写、NativeCall、desc/check/alert 等关键词
+4. 语法概念：过滤 ?{}、as 命名、include、getReturns、typeName 等
+
+问题应该覆盖：语法查询、规则编写、漏洞检测、数据流分析、多语言支持等。
+`
+
+// .sf 可执行规则专用 extraPrompt（强调完整规则示例、可执行语法）
+sfRuleExtraPrompt = `
+【SyntaxFlow 可执行规则示例 - 高优先级检索】
+这是一段 **可执行的** SyntaxFlow 规则代码（.sf 文件），包含完整的 desc、审计表达式、alert 等。
+
+生成问题时，请 **优先** 覆盖：
+1. 完整规则示例：如 "开放重定向 SyntaxFlow 规则怎么写"、"XXE 漏洞检测规则示例"
+2. 可执行语法：desc()、#->、alert、?{}、as 等真实语法的使用
+3. 漏洞类型 + 规则：如 "SQL 注入 SyntaxFlow"、"redirect 重定向规则"
+4. 避免仅生成概念性问题，要能让用户检索到这段 **可直接参考的规则代码**
+
+问题应具体到"怎么写"、"规则示例"、"完整规则"，而非单纯概念描述。
+`
+
+wg = sync.NewSizedWaitGroup(maxConcurrency)
+resultsChan = make(chan map[string]any, len(allItems))
+totalQuestions = 0
+questionsMutex = sync.NewMutex()
+
+processItem = func(idx, total, item) {
+    defer wg.Done()
+    path = item["path"]
+    title = item["title"]
+    content = item["content"]
+    isSf = item["isSf"] || false
+    result = {"success": false, "error": nil, "questions": 0}
+    try {
+        tag = ""
+        extraPrompt = sfExtraPrompt
+        metaType = "SyntaxFlow文档"
+        if isSf {
+            tag = "[.sf规则]"
+            extraPrompt = sfRuleExtraPrompt
+            metaType = "SyntaxFlow可执行规则"
+        }
+        log.Info("[%d/%d] %s %s", idx, total, title, tag)
+        ragOpts = [
+            rag.extraPrompt(extraPrompt),
+            rag.setSearchMeta(metaType, title),
+            rag.noPotentialQuestions(),
+        ]
+        if aiType != "" && aiModel != "" {
+            ragOpts = append(ragOpts, rag.aiServiceType(aiType, ai.model(aiModel)))
+        }
+        searchResult, buildErr = rag.BuildSearchIndexKnowledge(ragCollectionName, content, ragOpts...)
+        if buildErr != nil {
+            result["error"] = sprintf("%v", buildErr)
+            resultsChan <- result
+            return
+        }
+        qn = len(searchResult.Questions)
+        questionsMutex.Lock()
+        totalQuestions += qn
+        questionsMutex.Unlock()
+        result["success"] = true
+        result["questions"] = qn
+    } catch e {
+        result["error"] = sprintf("%v", e)
+    }
+    resultsChan <- result
+}
+
+log.Info("=== Processing (max %d concurrent) ===", maxConcurrency)
+totalItems = len(allItems)
+idx = 1
+for item in allItems {
+    currentIdx = idx
+    wg.Add(1)
+    go processItem(currentIdx, totalItems, item)
+    idx++
+}
+wg.Wait()
+close(resultsChan)
+
+successCount = 0
+failedCount = 0
+for r in resultsChan {
+    if r["success"] {
+        successCount++
+    } else {
+        failedCount++
+        log.Warn("Failed: %s", r["error"])
+    }
+}
+
+log.Info("=== Exporting RAG ===")
+rag.Export(ragCollectionName, finalOutputPath)~
+
+log.Info("=== Complete ===")
+log.Info("Success: %d, Failed: %d, Questions: %d", successCount, failedCount, totalQuestions)
+log.Info("RAG: %s", finalOutputPath)
+if successCount == 0 {
+    os.Exit(1)
+}
+os.Exit(0)

@@ -1,0 +1,7 @@
+// Cookbook: GroovyShell 代码执行
+desc(title: "groovy shell eval")
+
+GroovyShell().evaluate(* as $cmd);
+$cmd #-> * as $target;
+check $target then "fine" else "not found groovyShell.evaluate parameter";
+alert $target for { risk: rce-code };

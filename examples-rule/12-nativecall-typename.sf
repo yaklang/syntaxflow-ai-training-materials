@@ -1,0 +1,7 @@
+// Syntax: <typeName()>, <fullTypeName()>
+// Cookbook: 获取值的类型名
+desc(title: "typeName")
+
+JSON.parse<typeName()> as $name;
+JSON.parse<fullTypeName()> as $fullName;
+check $name then "found" else "none";

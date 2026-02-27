@@ -1,0 +1,18 @@
+// 最小化开放重定向规则示例（Golang gin）
+// 展示正确语法：desc 开头、具体方法链、* as $param、#-> 数据流
+desc(
+	title: "Open Redirect (Golang gin minimal)",
+	title_zh: "开放重定向最小示例",
+	type: vuln,
+	level: high,
+	risk: "open-redirect",
+)
+<include('golang-gin-context')> as $ctx;
+$ctx.Redirect(*<slice(index=2)> #-> as $param);
+$param.Query as $high;
+$param.PostForm as $high;
+alert $high for {
+	message: "未验证重定向：参数来自 Query/PostForm",
+	level: high,
+	risk: "开放重定向",
+};

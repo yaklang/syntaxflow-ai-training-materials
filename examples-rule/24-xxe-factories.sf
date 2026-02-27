@@ -1,0 +1,11 @@
+// Cookbook: XXE with $factories variable
+desc(
+	title: "XXE DocumentBuilderFactory",
+	"Title": "审计因为未设置 setFeature 等安全策略造成的XXE漏洞",
+	"Fix": "修复方案：需要用户设置 setFeature / setXIncludeAware / setExpandEntityReferences 等安全配置"
+)
+
+$factories = DocumentBuilderFactory.newInstance();
+$factories?{!((.setFeature) || (.setXIncludeAware) || (.setExpandEntityReferences))} as $entry;
+$entry.*Builder().parse(* #-> as $source);
+check $source then "XXE Attack" else "XXE Safe";

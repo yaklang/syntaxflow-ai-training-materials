@@ -1,0 +1,8 @@
+// Syntax: glob 和正则搜索
+// Cookbook: .get* 模糊搜索, *config* glob, /(get[A-Z].*)/ 正则
+desc(title: "search glob and regexp")
+
+.get* as $getMethods;
+*config* as $configVars;
+/(get[A-Z].*)/ as $regexpMatch;
+check $getMethods then "glob" else "none";

@@ -1,0 +1,9 @@
+// Cookbook: URL 请求检测
+desc(title: "URL open connection")
+
+URL(* #-> * as $source).openConnection().getResponseMessage() as $sink;
+check $sink then "Request From URL" else "No Response From URL";
+alert $sink for {
+	message: "Request From URL Detected",
+	level: info,
+};

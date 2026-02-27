@@ -1,0 +1,8 @@
+// Syntax: 常量搜索 - g(glob), r(regexp), e(exact)
+// Cookbook: 常量搜索支持三种格式
+desc(title: "search constant")
+
+g"a*" as $globConst;
+e"password" as $exactConst;
+r"^\d+$" as $regexpConst;
+check $exactConst then "found" else "none";

@@ -1,0 +1,8 @@
+// Syntax: as 中间结果暂存
+// Cookbook: 审计中间变量
+desc(title: "as variable")
+
+.parse(* as $params);
+DriverManager.getConnection().createStatement().executeQuery(* as $sql);
+$params as $stored;
+check $stored then "found" else "none";

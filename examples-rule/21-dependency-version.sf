@@ -1,0 +1,8 @@
+// Cookbook: 依赖版本检测 __dependency__, version_in
+desc(title: "dependency version")
+
+__dependency__.*fastjson.version as $ver;
+$ver?{version_in:(1.2.3,2.3.4]} as $vulnVersion;
+alert $vulnVersion for {
+	title: "存在 fastjson 1.2.3-2.3.4 漏洞",
+};

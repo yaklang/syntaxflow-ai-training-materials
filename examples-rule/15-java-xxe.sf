@@ -1,0 +1,15 @@
+// Cookbook: XXE DocumentBuilderFactory
+desc(
+	title: "Check XXE in DocumentBuilderFactory",
+	title_zh: "检查 DocumentBuilderFactory 中的 XXE 漏洞",
+	risk: XXE,
+	type: vuln,
+)
+
+DocumentBuilderFactory.newInstance()?{!((.setFeature) || (.setXIncludeAware) || (.setExpandEntityReferences))} as $entry;
+$entry.*Builder().parse(* #-> as $source);
+check $source then "XXE Attack" else "XXE Safe";
+alert $source for {
+	message: "XXE Attack Detected",
+	level: high,
+};

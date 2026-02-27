@@ -1,0 +1,13 @@
+// Syntax: desc statement - title, type, level, risk, lib
+// Cookbook: desc 内置字段
+desc(
+	title: "Example Rule Title",
+	title_zh: "示例规则标题",
+	type: audit,
+	level: info,
+	risk: rce,
+	lib: "example-lib",
+	desc: <<<TEXT
+规则详细描述，可使用 heredoc 语法书写多行文本。
+TEXT
+)

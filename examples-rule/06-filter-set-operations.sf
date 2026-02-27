@@ -1,0 +1,12 @@
+// Syntax: 集合运算 - 交集 &, 差集 -, 并集 +
+// Cookbook: 集合运算 - 需在数据流分析中先定义各变量
+desc(title: "set operations")
+
+_GET.* as $params;
+$params --> * as $sink;
+$sink<dataflow(<<<CODE
+*?{opcode: call && <getCaller><name>?{have: filter}} as $__next__
+CODE)> as $filtered;
+$sink - $filtered as $vuln;
+$sink & $filtered as $intersection;
+check $vuln then "vuln" else "safe";

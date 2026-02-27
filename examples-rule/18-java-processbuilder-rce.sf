@@ -1,0 +1,11 @@
+// Cookbook: ProcessBuilder RCE
+desc(title: "rce")
+
+ProcessBuilder(* as $cmd) as $builder;
+$builder.start() as $execBuilder;
+check $execBuilder then "fine" else "rce 2 SyntaxFlow error";
+alert $execBuilder for {
+	message: "发现潜在的远程代码执行漏洞，未正确处理 ProcessBuilder 的参数。",
+	risk: rce,
+	level: high,
+};

@@ -1,0 +1,11 @@
+// Syntax: <dataflow(<<<CODE ... CODE)> 路径敏感过滤
+// Cookbook: $__next__ 特殊变量
+desc(title: "dataflow path filter")
+
+_GET.* as $params;
+$params --> * as $sink;
+$sink<dataflow(<<<CODE
+*?{opcode: call && <getCaller><name>?{have: mysqli_real_escape_string}} as $__next__
+CODE)> as $filtered;
+$sink - $filtered as $vuln;
+alert $vuln;
