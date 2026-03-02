@@ -10,6 +10,11 @@
 | xxe-detection.md | DocumentBuilder.parse XXE 检测 |
 | dataflow-filter.md | 数据流 + 过滤函数（如 mysqli_real_escape_string） |
 | sql-injection-path-sensitive.md | 路径敏感 SQL 注入（Cookbook 多级告警示例） |
+| **write-syntaxflow-rule-workflow.md** | **write_syntaxflow_rule 工作流**：check-syntaxflow-syntax、result_vars_diagnostic |
+| **rule-debugging-strategy.md** | **matched=false 调试策略**：变量链解读、迭代止损、include 选型 |
+| **ai-common-mistakes.md** | **AI 常见错误**：desc 格式、spin 绕开验证、迭代失控、禁止语法 |
+| **desc-errors-troubleshooting.md** | **desc 语法错误排错**：错误消息解读、正确/错误示例、修复检查清单 |
+| **writing-strategies.md** | **编写策略**：用户意图、Engine-First、Source-Sink-Filter、主动洞察（参考 irify-sast-skill） |
 
 ## 使用方式
 

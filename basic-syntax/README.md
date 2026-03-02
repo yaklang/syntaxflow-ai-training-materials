@@ -10,7 +10,10 @@
 | quick-start.md | 快速上手 |
 | rule-intro.md | 规则文件结构、desc 内置字段 |
 | intro-and-desc.md | desc 语句详解 |
+| **ai-operator-quick-reference.md** | **AI 速查**：运算符、漏洞模式、完整规则结构（ssa_query 风格） |
+| **nativecall-quick-reference.md** | **NativeCall 速查**：常用 &lt;include&gt;、&lt;typeName&gt;、&lt;dataflow&gt; 等用法 |
 | cookbook-summary.md | Cookbook 摘要（集合运算、lib/include、dataflow） |
+| [buildin-lib-reference.md](../buildin-lib-reference.md) | **Buildin Lib 参考**：各语言 lib 详解、include 使用场景（仓库根目录） |
 | sf-search.md | 词法搜索：变量名、方法名、glob、正则、常量 |
 | sf-filter.md | ?{} 条件过滤、集合运算 |
 | sf-dataflow.md | 数据流 Use-Def 链 ->, -->, #>, #-> |

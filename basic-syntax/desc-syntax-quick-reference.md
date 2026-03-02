@@ -46,11 +46,13 @@ TEXT
 | reference | heredoc | 参考链接 |
 | rule_id | string | 可选 UUID |
 
-### 常见错误
+### 常见错误（AI 易犯）
 
 - ❌ 在第一个 desc 中写 `'file://xxx': <<<UNSAFE` —— 测试用例必须在**第二个 desc**
 - ❌ 使用 `desc: "单行"` 包裹多行文本 —— 多行应用 heredoc `<<<TEXT ... TEXT`
-- ❌ 遗漏逗号或冒号 —— `key: value` 格式，项之间可省略逗号（部分解析器允许）
+- ❌ **缺少冒号**：`title "xxx"`、`type vuln` 错误。必须写 `title: "xxx"`、`type: vuln`（冒号不可省略）
+- ❌ **用逗号分隔字段**：`title: "x", type: audit,` 易触发 `mismatched input ',' expecting <EOF>`。多行 desc 中字段间用**换行**分隔，不要用逗号
+- ✅ 正确格式：每行 `fieldName: value`，字段间换行，参考 golang-template-ssti.sf 第 1–10 行
 
 ---
 
@@ -107,7 +109,7 @@ SAFE
 
 1. 参考本库中已有规则模板（如 golang-template-ssti.sf、golang-reflected-xss-gin-context.sf）的 desc 结构。
 2. 在未确认正确 desc 语法格式前，不要继续修改规则文件。
-3. 修改后必须调用 `check-syntaxflow-syntax` 验证，若有漏洞样例则调用 `verify-syntaxflow-rule-against-sample`。
+3. 修改后必须调用 `check-syntaxflow-syntax` 验证，若有漏洞样例则传入 path、sample_code、filename、language 进行正例自检。
 
 ---
 

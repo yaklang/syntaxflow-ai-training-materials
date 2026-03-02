@@ -12,6 +12,7 @@
   - include 组合规则  
   - 依赖版本检测  
   - 递归链 `...`  
+  - **通用模式（Common Patterns）**：Source-Sink-Filter、Include+Exclude 遍历、变量并集/差集、类型过滤、深度限制、SCA 版本检查（参考 irify-sast-skill）  
 
 ## 与 examples-rule 的区别
 

@@ -2,6 +2,23 @@
 
 本文档明确列出 **SyntaxFlow 不支持的语法**，避免与 Semgrep、CodeQL 等其它规则引擎混淆。
 
+## desc 元数据格式（AI 高频错误）
+
+- **`desc(title "x")`** — 缺少冒号。必须写 `desc(title: "x")`。
+- **`desc(title: "x", type: vuln)`** — 字段间**禁止逗号**。应换行分隔，如 `desc(\n\ttitle: "x"\n\ttype: vuln\n)`。
+- **`desc("title": "x")`** — 键名不加引号。
+- **尾逗号** — 最后一行后的 `,` 会导致解析错误，须删除。
+
+**正确示例**：
+
+```syntaxflow
+desc(
+	title: "规则标题"
+	type: vuln
+	level: high
+)
+```
+
 ## 禁止使用的顶层结构
 
 - **`rule("name")`** — SyntaxFlow 没有 `rule()`。规则文件直接以 `desc()` 开头。

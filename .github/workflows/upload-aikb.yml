@@ -328,8 +328,7 @@ jobs:
             --register-name "SyntaxFlow AIKB" \
             --register-name-zh "SyntaxFlow 规则知识库" \
             --version "$VERSION" \
-            --rag-file "/ai-knowledge-base/rag/syntaxflow-aikb.rag" \
-            --file-size "$RAG_FILE_SIZE"
+            --rag-file "/ai-knowledge-base/rag/syntaxflow-aikb.rag"
 
           echo ""
           echo "Uploading rags-latest.json to OSS..."

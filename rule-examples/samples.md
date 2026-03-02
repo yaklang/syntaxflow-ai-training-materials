@@ -71,3 +71,82 @@ desc(lang: golang, alert_high: 1,
     'file://vuln.go': <<<UNSAFE ... UNSAFE,
     'safefile://safe.go': <<<SAFE ... SAFE);
 ```
+
+---
+
+## 通用模式（Common Patterns）
+
+### desc 格式（必读，避免语法错误）
+
+**正确格式**：每行 `fieldName: value`，冒号不可省略；字段间换行分隔，**禁止逗号**。
+
+```syntaxflow
+desc(
+	title: "规则标题"
+	type: vuln
+	level: high
+	cwe: "CWE-78"
+)
+```
+
+**错误示例**（AI 易犯）：
+- `desc(title "x")` → 缺冒号，应为 `title: "x"`
+- `desc(title: "x", type: vuln)` → 禁止逗号，应换行分隔
+- `desc("title": "x")` → 键名不加引号
+
+详见 `basic-syntax/desc-syntax-quick-reference.md`、`practice/desc-errors-troubleshooting.md`。
+
+### Pattern 1：Source-Sink-Filter 三层检测
+
+```syntaxflow
+<include('java-spring-mvc-param')> as $source;
+<include("java-common-filter")>() as $filter;
+<mybatisSink> as $sink;
+
+$sink #{until: `* & $source`}-> as $all
+$all<dataflow(include=`* & $filter`)> as $filtered
+$all - $filtered as $unfiltered
+
+alert $filtered for { level: "mid", message: "有 filter" };
+alert $unfiltered for { level: "high", message: "无 filter" };
+```
+
+### Pattern 2：Include + Exclude 遍历
+
+```syntaxflow
+$sink #{
+    include: `<self> & $source`,
+    exclude: `<self>?{opcode:call}?{!<self> & $source}?{!<self> & $sink}`,
+}-> as $result;
+```
+
+### Pattern 3：变量并集与差集
+
+```syntaxflow
+$a + $b as $merged;     // 并集
+$all - $safe as $vuln;  // 差集：排除安全路径
+```
+
+### Pattern 4：类型过滤
+
+```syntaxflow
+$result?{<typeName>?{!any: Long,Integer,Boolean,Double}} as $nonPrimitive
+$val?{<fullTypeName>?{have:'javax.servlet'}} as $servletTypes
+```
+
+### Pattern 5：深度限制追踪
+
+```syntaxflow
+$sink #{depth: 5}-> as $source     // 最多 5 层
+$val #{
+  until: `* & $source`,            // 到达 source 即停止
+}-> as $reachable
+```
+
+### Pattern 6：SCA 依赖版本检查
+
+```syntaxflow
+__dependency__.*fastjson.version as $ver;
+$ver?{version_in:(0.1.0,1.2.83]} as $vuln
+alert $vuln for { level: "high", title: "fastjson 漏洞版本" };
+```
