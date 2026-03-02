@@ -19,7 +19,7 @@
 
 | 步骤 | 对应规则写法 | 说明 |
 |------|--------------|------|
-| source | `<include('golang-gin-context')> as $sink` | gin 上下文即 source 来源，该 lib 匹配 `*.Query`、`*.PostForm` 等 |
+| source | `<include('golang-gin-context')> as $gin` 或 `as $sink` | **必须**带 `as $var`，否则 $gin 未定义。gin 上下文即 source 来源，该 lib 匹配 `*.Query`、`*.PostForm` 等 |
 | sink | `$sink.HTML(*<slice(index=3)> #-> as $param)` | 危险函数为 `c.HTML`，第 3 个参数为数据 map，用 slice 取参 |
 | topdef | `$param #->` 溯源 | 追踪 `gin.H{"Query": query}` 中 `query` 的来源 |
 | filter | `$param.HTMLEscapeString(* #-> as $safe); $param - $safe as $output` | 排除经 `HTMLEscapeString` 转义的路径 |
@@ -106,7 +106,7 @@ alert $vuln;
 
 `$sink - $filtered` 得到**未经过滤**的路径，即真正漏洞。
 
-当 matched=false 时，按上述「用户输入→危险函数→topdef→过滤函数」顺序排查，详见 [rule-debugging-strategy.md](./rule-debugging-strategy.md) 第 1 节及案例。
+当 matched=false 时，按上述「用户输入→危险函数→topdef→过滤函数」顺序排查，详见 [rule-debugging-strategy.md](./rule-debugging-strategy.md) 第 1 节及案例。若 source 为 0 难以定位，可尝试将复合模式拆分（如 `$gin.Context.Query` → `$gin.Context as $context` 与 `$context.Query`）逐段验证，见 rule-debugging-strategy 案例 5。
 
 ## 2. 遵循用户意图（Critical）
 

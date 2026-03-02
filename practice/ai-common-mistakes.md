@@ -14,8 +14,9 @@ AI 常将 JSON/JavaScript 写法带入 desc，导致 parser 报错：
 | `desc(type vuln, level high)` | 冒号缺失；误用逗号 | `desc(type: vuln, level: high)` 或换行分隔 |
 | `desc(title: "x", type: "vuln",)` | 尾逗号（JSON 风格） | 去掉尾逗号 |
 | `desc("title": "x")` | 键名加引号 | `desc(title: "x")` |
+| heredoc 结束符 `    TEXT`（有前导空格） | 不闭合，触发 mismatched input ':' | 换行后紧跟 `TEXT`，行首无空格 |
 
-**根本原因**：SyntaxFlow desc 使用 `fieldName: value`，冒号不可省略；字段间用换行分隔，**禁止逗号**。
+**根本原因**：SyntaxFlow desc 使用 `fieldName: value`，冒号不可省略；字段间用换行分隔，**禁止逗号**；heredoc 结束符必须**行首无空格**。
 
 ### 正确格式速记
 
@@ -53,6 +54,8 @@ desc(
 1. **避免无效 modify_rule 循环**：若 linter/check 持续报同类型错误（如 desc 格式），应一次性按规范修正，而非反复小改。
 2. **遇到 desc 错误**：立即查阅 desc 格式文档，按 `fieldName: value`、禁止逗号等规则修正。
 3. **迭代失败时**：参考 `rule-debugging-strategy.md` 执行止损（回归参考规则、最小化重试）。
+4. **$source:0 时**：尝试拆分复合模式逐段验证（如 `$gin.Context.Query` → `$gin.Context as $context`、`$context.Query as $query`），分别检测 $context、$query 的匹配数，定位断点。见 rule-debugging-strategy 案例 5。
+5. **include 相关变量为 0 时**：读取 `syntaxflow-ai-training-materials/awesome-rule` 中对应 lib 文件（如 golang-gin-context→awesome-rule/golang/lib/golang-gin-context.sf），查看 lib 内部模式，按 lib 结构拆分并分别测试。见 rule-debugging-strategy 案例 6。
 
 ---
 
@@ -75,7 +78,32 @@ AI 认为“迭代超过限制”而停止。
 
 ---
 
-## 4. 其它禁止语法（与 Semgrep/CodeQL 混淆）
+## 4. include 用法错误：必须带 `as $var`
+
+### 错误形态
+
+AI 常漏写 `as $var`，导致后续 `$gin`、`$context` 等变量未定义：
+
+| 错误示例 | 问题 | 正确写法 |
+|----------|------|----------|
+| `<include('golang-gin-context')>` 后直接使用 `$gin.Context` | include 结果未绑定变量，`$gin` 未定义 | `<include('golang-gin-context')> as $gin` |
+| 换行后写 `$gin.Context as $context` 但 include 无 `as $gin` | 同上 | `as $gin` 与 include 同一行 |
+
+### 正确格式
+
+```syntaxflow
+<include('golang-gin-context')> as $gin;
+$gin.Context as $context;
+$context.Query(* as $param) as $source;
+```
+
+**规则**：`<include('lib-name')>` **必须**紧跟 `as $var`，将引用结果绑定到变量，后续才能用 `$var.*`。
+
+**变量依赖与从下往上分析**：规则中不应存在未定义的变量。若 `$gin` 被使用（如 `$gin.Context`）但未定义，`$context`、`$param`、`$source`、`$sink` 将均为 0。诊断时从下往上追溯：$sink:0 因 $source:0，$source:0 因 $context:0，$context:0 因 $gin 未定义。根因多为 include 缺少 `as $gin`。
+
+---
+
+## 5. 其它禁止语法（与 Semgrep/CodeQL 混淆）
 
 | 禁止用法 | 正确替代 |
 |----------|----------|
@@ -88,7 +116,7 @@ AI 认为“迭代超过限制”而停止。
 
 ---
 
-## 5. 不主动验证即继续 modify_rule
+## 6. 不主动验证即继续 modify_rule
 
 ### 现象
 
@@ -111,7 +139,7 @@ AI 在 modify_rule 后收到语法错误反馈，直接进行下一次 modify_ru
 
 ---
 
-## 6. 工具调用注意
+## 7. 工具调用注意
 
 - **check-syntaxflow-syntax**：有正例时 **必须** 传入 `sample_code`、`filename`、`language`，否则无法得到 matched 结果。
 - **write_rule vs modify_rule**：初次生成用 `write_rule`；后续修正用 `modify_rule`，不要用 write_rule 覆盖已有文件导致结构丢失。

@@ -31,6 +31,7 @@ TEXT
     rule_id: "可选UUID"
 )
 ```
+**注意**：heredoc 结束符（TEXT、DESC、SOLUTION 等）必须**行首无空格**。错误：`    TEXT`。正确：换行后紧跟 `TEXT`。
 
 ### 字段说明
 
@@ -52,7 +53,8 @@ TEXT
 - ❌ 使用 `desc: "单行"` 包裹多行文本 —— 多行应用 heredoc `<<<TEXT ... TEXT`
 - ❌ **缺少冒号**：`title "xxx"`、`type vuln` 错误。必须写 `title: "xxx"`、`type: vuln`（冒号不可省略）
 - ❌ **用逗号分隔字段**：`title: "x", type: audit,` 易触发 `mismatched input ',' expecting <EOF>`。多行 desc 中字段间用**换行**分隔，不要用逗号
-- ✅ 正确格式：每行 `fieldName: value`，字段间换行，参考 golang-template-ssti.sf 第 1–10 行
+- ❌ **heredoc 结束符有前导空格**：`    TEXT`（4 空格+TEXT）不会被识别，heredoc 不闭合，易触发 `mismatched input ':' expecting <EOF>`。结束标识符必须**行首无空格**
+- ✅ 正确格式：每行 `fieldName: value`，字段间换行；heredoc 结束符行首无空格。参考 golang-reflected-xss-gin-context.sf
 
 ---
 

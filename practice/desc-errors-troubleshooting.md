@@ -8,6 +8,7 @@
 |------------------|----------|----------|
 | `missing ')'` | desc 内格式错误导致括号不匹配；或字段缺冒号 | 检查每行是否 `key: value`，补全冒号 |
 | `mismatched input ','` | 字段间用了逗号 | 将逗号改为换行，或删除逗号 |
+| **`mismatched input ':' expecting <EOF>`** | **heredoc 结束符有前导空格**，未被识别，heredoc 未闭合，导致后续 `:` 被误解析 | 将 heredoc 结束符（如 TEXT、DESC）置于**行首**，删除前导空格 |
 | `unexpected token` | 键名加引号、尾逗号等 | 去掉 `"title"` 引号、尾逗号 |
 
 ## 2. 错误示例与正确写法
@@ -65,15 +66,40 @@ desc(
 )
 ```
 
+### ❌ 错误：heredoc 结束符有前导空格
+
+```syntaxflow
+desc(
+    desc: <<<TEXT
+    该规则用于检测...
+    TEXT
+)
+```
+
+**问题**：结束符 `TEXT` 前有空格（`    TEXT`），SyntaxFlow 要求结束符**单独占一行且行首无空格**。未识别结束符会导致 heredoc 不闭合，解析器吞掉后续 `)`，在遇到下一个 `:` 时报 `mismatched input ':' expecting <EOF>`。
+
+### ✅ 正确
+
+```syntaxflow
+desc(
+    desc: <<<TEXT
+    该规则用于检测...
+TEXT
+)
+```
+
+结束符 `TEXT` 必须紧接换行、行首无任何空格或制表符。参考 golang-reflected-xss-gin-context.sf。
+
 ## 3. 修复检查清单
 
 遇到 desc 相关语法错误时，依次检查：
 
 1. [ ] 每个字段是否为 `fieldName: value`，**冒号不可省略**
 2. [ ] 字段之间是否仅用**换行**分隔，**无逗号**
-3. [ ] 键名（如 title、type、level）是否**无引号**
-4. [ ] 是否有**尾逗号**（最后一行后的 `,`）— 若有则删除
-5. [ ] 括号是否配对：`desc(` 与 `)` 一一对应
+3. [ ] heredoc（`<<<TEXT ... TEXT`）的结束标识符是否**行首无空格**
+4. [ ] 键名（如 title、type、level）是否**无引号**
+5. [ ] 是否有**尾逗号**（最后一行后的 `,`）— 若有则删除
+6. [ ] 括号是否配对：`desc(` 与 `)` 一一对应
 
 ## 4. 参考
 

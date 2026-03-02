@@ -12,7 +12,8 @@
 | sql-injection-path-sensitive.md | 路径敏感 SQL 注入（Cookbook 多级告警示例） |
 | **write-syntaxflow-rule-workflow.md** | **write_syntaxflow_rule 工作流**：check-syntaxflow-syntax、result_vars_diagnostic |
 | **rule-debugging-strategy.md** | **matched=false 调试**：4 步排查顺序、4 类案例（用户输入/sink/topdef/filter）、变量链解读、include 速查、参考规则表 |
-| **ai-common-mistakes.md** | **AI 常见错误**：desc 格式、spin 绕开验证、迭代失控、禁止语法 |
+| **ai-common-mistakes.md** | **AI 常见错误**：desc 格式、include 必须 as $var、spin 绕开验证、迭代失控、禁止语法 |
+| **include-usage-quickfix.md** | **include 速记**：`<include('golang-gin-context')> as $gin` 正确写法，避免 $gin 未定义 |
 | **desc-errors-troubleshooting.md** | **desc 语法错误排错**：错误消息解读、正确/错误示例、修复检查清单 |
 | **writing-strategies.md** | **编写策略**：核心思路（source→sink→topdef）、5 类漏洞案例（XSS/命令注入/SQL/SSTI/filter）、用户意图、Engine-First |
 

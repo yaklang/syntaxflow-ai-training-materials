@@ -8,6 +8,7 @@
 - **`desc(title: "x", type: vuln)`** — 字段间**禁止逗号**。应换行分隔，如 `desc(\n\ttitle: "x"\n\ttype: vuln\n)`。
 - **`desc("title": "x")`** — 键名不加引号。
 - **尾逗号** — 最后一行后的 `,` 会导致解析错误，须删除。
+- **heredoc 结束符有前导空格** — `desc: <<<TEXT ...     TEXT` 中 `    TEXT` 不会被识别，heredoc 不闭合，易触发 `mismatched input ':' expecting <EOF>`。结束标识符必须**行首无空格**。
 
 **正确示例**：
 

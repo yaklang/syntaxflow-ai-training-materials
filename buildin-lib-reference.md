@@ -8,6 +8,21 @@
 - **用途**：lib 多为可复用的 **source（污点源）**、**sink（汇点）**、**filter（过滤函数）** 定义，组合后用于数据流检测
 - **路径**：buildin 目录按语言划分：`golang/lib/`、`java/lib/`、`php/lib/`、`c/lib/`
 
+### ⚠️ include 必须带 `as $var`
+
+`<include('lib-name')>` **必须**紧跟 `as $var`，将引用结果绑定到变量，否则后续无法使用该引用：
+
+```
+// ❌ 错误：$gin 未定义
+<include('golang-gin-context')>
+$gin.Context as $context;
+
+// ✅ 正确
+<include('golang-gin-context')> as $gin;
+$gin.Context as $context;
+$context.Query(* as $param) as $source;
+```
+
 ---
 
 ## 1. Golang 语言 Lib

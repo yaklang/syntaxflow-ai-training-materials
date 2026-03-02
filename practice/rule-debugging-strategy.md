@@ -100,6 +100,56 @@ CODE)> as $filtered;
 | Golang SQL 注入 | golang-database-gin-context-sql.sf | Query/QueryRow 参数溯源，until Sprintf/add |
 | Golang SSTI | golang-template-ssti.sf | template.Execute 参数溯源，include/exclude 配置 |
 
+### 案例 5：source 未匹配时拆分模式逐项验证
+
+**现象**：`$source:0`，链首为 0，无法确定是整体模式错误还是其中某一段不匹配。
+
+**策略**：将复合模式拆成多步，分别验证每一步是否能匹配，从而定位断点。
+
+以 `$gin.Context.Query(* as $param) as $source` 为例，若 $source 为 0，可拆分为：
+
+| 步骤 | 拆分写法 | 验证目标 |
+|------|----------|----------|
+| 1 | `$gin.Context as $context` | 检查 $context 能否匹配 gin.Context 类型/实例 |
+| 2 | `$context.Query as $query` 或 `$context.Query(* #-> as $param)` | 检查 .Query 方法能否匹配 |
+| 3 | 分别调用 check-syntaxflow-syntax，看 result_vars_diagnostic 中 $context、$query 的匹配数 | 首个为 0 的变量即断点 |
+
+**示例：Gin 用户输入拆分**
+
+```syntaxflow
+// 原始：一次性匹配 $gin.Context.Query(* as $param)，若 $source:0 无法定位
+<include('golang-gin-context')> as $gin;
+$gin.Context.Query(* as $param) as $source;
+
+// 拆分验证：先验证 Context 能否匹配
+<include('golang-gin-context')> as $gin;
+$gin.Context as $context;
+$context.Query(* #-> as $param) as $source;
+// 分别观察 $context、$param、$source 的匹配数
+alert $source for { ... };
+```
+
+若 `$context:0`，则问题在 `$gin.Context`（如 include 输出结构、类型名等）；若 `$context:1` 且 `$param:0`，则问题在 `.Query` 的写法或参数捕获。参考 golang-gin-context.sf：该 lib 使用 `*.Query(* #-> as $param)` 和 `gin.Context as $param` 等分步模式。
+
+**通用原则**：复合链 `A.B.C` 匹配失败时，拆成 `A as $a`、`$a.B as $b`、`$b.C as $c`，逐段检查 result_vars_diagnostic，定位首个为 0 的变量。
+
+### 案例 6：include 未匹配时手动查看 lib 内容并拆分
+
+**现象**：`<include('xxx')> as $var` 后 `$var:0`，或链首变量来自 include 且为 0，难以确定 include 是否选错或模式写法有问题。
+
+**策略**：若 include 找不到/不匹配，尝试**手动查看 lib 文件内容**，按 lib 内部结构拆分并逐段测试。
+
+1. **查找 lib 文件路径**：在 `syntaxflow-ai-training-materials/awesome-rule` 中按 lib 名搜索 `.sf` 文件，路径多为 `{语言}/lib/` 或其子目录
+   - 如 `golang-gin-context` → `awesome-rule/golang/lib/golang-gin-context.sf`
+   - 如 `java-spring-mvc-param` → `awesome-rule/java/lib/user-input-http-source/java-spring-mvc-params.sf`
+   - 如 `php-param` → `awesome-rule/php/lib/php-custom-param.sf`（含 `lib: 'php-param'`）
+
+2. **读取 lib 内容**：查看 lib 内部使用的具体模式（如 `*.Query(* #-> as $param)`、`gin.Context as $param`、`*.PostForm(* #-> as $param)` 等）。
+
+3. **按 lib 结构拆分**：根据 lib 中的分步写法，将当前规则拆成与 lib 一致的多步模式，分别调用 check-syntaxflow-syntax 观察各变量匹配数，定位断点。
+
+4. **示例**：`<include('golang-gin-context')> as $gin` 后 `$gin:0` 或 `$source:0` 时，读取 `awesome-rule/golang/lib/golang-gin-context.sf`，可见其使用 `*.Query(* #-> as $param)`、`*.PostForm(* #-> as $param)`、`gin.Context as $param` 等。据此拆分：先写 `gin.Context as $context` 或 `*.Query(* #-> as $param)` 单独验证，通过后再组合。
+
 ## 2. 理解返回的变量链
 
 工具返回 `result_vars_diagnostic`（所有变量及其匹配数量）和 `diagnostic_hint`（断点解读）。

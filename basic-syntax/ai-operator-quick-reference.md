@@ -11,7 +11,7 @@
 | `?{}` | 条件过滤 | `* ?{opcode: call}` |
 | `as $var` | 捕获到变量 | `Runtime.exec(* as $cmd)` |
 | `alert $var` | 标记为告警 | `alert $sink for { message: "...", level: high }` |
-| `<include('lib')>` | 引入 buildin 库 | `<include('golang-user-input')> as $input` |
+| `<include('lib')>` | 引入 buildin 库（**必须**带 `as $var`） | `<include('golang-gin-context')> as $gin`、`<include('golang-user-input')> as $input` |
 | `...` | 递归链（任意深度调用） | `DocumentBuilderFactory...parse()` |
 | `*` | 通配 | `* as $any`、`.get*` 方法名 glob |
 
