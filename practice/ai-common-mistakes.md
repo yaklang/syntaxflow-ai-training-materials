@@ -88,7 +88,30 @@ AI 认为“迭代超过限制”而停止。
 
 ---
 
-## 5. 工具调用注意
+## 5. 不主动验证即继续 modify_rule
+
+### 现象
+
+AI 在 modify_rule 后收到语法错误反馈，直接进行下一次 modify_rule，**未调用** check-syntaxflow-syntax 验证。导致：
+- 无法获取带行号的完整错误信息，定位困难
+- 陷入盲目修改循环（spin）
+- 有正例时无法完成 matched 自检
+
+### 根因
+
+- 系统在 write_rule/modify_rule 后会自动执行语法检查并 Feedback，AI 可能误认为“已有验证结果”而不再调用工具
+- reactive 提示“下一步：必须调用 check-syntaxflow-syntax”仅在**无反馈**时显示，有错误时 AI 看不到该提示
+
+### 规避
+
+- **每次** write_rule 或 modify_rule 后，**必须**立即调用 check-syntaxflow-syntax 验证
+- 有语法错误时：先调用验证获取完整错误（含行号），再根据结果 modify_rule
+- 语法通过时：若有正例，传入 sample_code、filename、language 做 matched 自检
+- **禁止**在未调用验证工具的情况下进行下一次 modify_rule 或 directly_answer
+
+---
+
+## 6. 工具调用注意
 
 - **check-syntaxflow-syntax**：有正例时 **必须** 传入 `sample_code`、`filename`、`language`，否则无法得到 matched 结果。
 - **write_rule vs modify_rule**：初次生成用 `write_rule`；后续修正用 `modify_rule`，不要用 write_rule 覆盖已有文件导致结构丢失。
