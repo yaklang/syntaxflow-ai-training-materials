@@ -1,0 +1,348 @@
+name: Update SyntaxFlow AIKB RAG and rags-latest.json
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'awesome-rule/**'
+      - 'basic-syntax/**'
+      - 'examples-rule/**'
+      - 'practice/**'
+      - 'rule-examples/**'
+      - 'scripts/**'
+      - '.github/workflows/update-rags-latest.yml'
+      - '.github/workflows/upload-aikb.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: update-syntaxflow-rags-latest
+  cancel-in-progress: false
+
+jobs:
+  update-rag-and-register:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Print trigger information
+        run: |
+          echo "============================================"
+          echo "Update SyntaxFlow AIKB RAG and rags-latest.json"
+          echo "============================================"
+          echo "Workflow triggered by: ${{ github.event_name }}"
+          echo "Branch: ${{ github.ref }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Actor: ${{ github.actor }}"
+          echo "Time: $(date -u +"%Y-%m-%d %H:%M:%S UTC")"
+          echo "============================================"
+
+      - name: Download Yak Engine from OSS
+        run: |
+          YAK_VERSION="1.4.5-beta5"
+          echo "=== Downloading Yak Engine v$YAK_VERSION ==="
+          wget -q --show-progress -O ./yak "https://yaklang.oss-accelerate.aliyuncs.com/yak/${YAK_VERSION}/yak_linux_amd64"
+          if [ ! -f ./yak ]; then
+            echo "ERROR: Failed to download yak engine"
+            exit 1
+          fi
+          chmod +x ./yak
+          ./yak version
+          echo "✓ Yak engine downloaded successfully"
+
+      - name: Generate Version
+        run: |
+          DATE_STR=$(date +%Y%m%d)
+          INDEX=1
+          while true; do
+            VERSION="${DATE_STR}-${INDEX}"
+            CHECK_URL="https://yaklang.oss-accelerate.aliyuncs.com/rag/syntaxflow-aikb/${VERSION}/syntaxflow-aikb.rag.gz"
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -I "$CHECK_URL" || echo "000")
+            if [ "$HTTP_STATUS" = "404" ] || [ "$HTTP_STATUS" = "000" ]; then
+              echo "Version $VERSION is available"
+              break
+            fi
+            echo "Version $VERSION already exists, trying next index..."
+            INDEX=$((INDEX + 1))
+            if [ $INDEX -gt 100 ]; then
+              echo "ERROR: Too many versions for today!"
+              exit 1
+            fi
+          done
+          echo "Using version: $VERSION"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          RAG_OSS_DIR="/rag/syntaxflow-aikb/${VERSION}"
+          echo "RAG_OSS_DIR=$RAG_OSS_DIR" >> $GITHUB_ENV
+
+      - name: Download existing AIKB files
+        run: |
+          echo "=== Downloading existing AIKB files ==="
+          OLD_ZIP_URL="https://yaklang.oss-accelerate.aliyuncs.com/ai-knowledge-base/syntaxflow-aikb.zip"
+          if curl -f -s -o "syntaxflow-aikb-old.zip" "$OLD_ZIP_URL"; then
+            echo "Downloaded existing ZIP file"
+            ls -lh syntaxflow-aikb-old.zip
+          else
+            echo "No existing ZIP found"
+          fi
+          RAG_URL="https://yaklang.oss-accelerate.aliyuncs.com/ai-knowledge-base/rag/syntaxflow-aikb.rag"
+          if curl -f -s -o "syntaxflow-aikb-old.rag" "$RAG_URL"; then
+            echo "Downloaded existing RAG file"
+            ls -lh syntaxflow-aikb-old.rag
+          else
+            echo "No existing RAG found"
+          fi
+
+      - name: Generate new AIKB ZIP file
+        run: |
+          echo "=== Generating new SyntaxFlow AIKB ZIP file ==="
+          ./yak scripts/merge-in-one-text.yak --base . --output syntaxflow-aikb.zip
+          if [ ! -f syntaxflow-aikb.zip ]; then
+            echo "ERROR: Failed to generate syntaxflow-aikb.zip"
+            exit 1
+          fi
+          ls -lh syntaxflow-aikb.zip
+
+      - name: Generate diff package
+        run: |
+          echo "=== Generating diff package ==="
+          if [ -f syntaxflow-aikb-old.zip ] && [ -f syntaxflow-aikb.zip ]; then
+            ./yak scripts/diff-zip-v2.yak --old syntaxflow-aikb-old.zip --new syntaxflow-aikb.zip --output diff-fs.zip || {
+              echo "Diff script failed or no changes detected"
+              echo "HAS_CHANGES=false" >> $GITHUB_ENV
+            }
+            if [ -f diff-fs.zip ]; then
+              DIFF_COUNT=$(unzip -l diff-fs.zip 2>/dev/null | tail -1 | awk '{print $2}' || echo "0")
+              if [ "$DIFF_COUNT" = "0" ] || [ -z "$DIFF_COUNT" ]; then
+                echo "No changes detected in diff package"
+                echo "HAS_CHANGES=false" >> $GITHUB_ENV
+                rm -f diff-fs.zip
+              else
+                echo "Diff package generated with $DIFF_COUNT files"
+                ls -lh diff-fs.zip
+                echo "HAS_CHANGES=true" >> $GITHUB_ENV
+              fi
+            else
+              echo "No diff package generated (no changes)"
+              echo "HAS_CHANGES=false" >> $GITHUB_ENV
+            fi
+            if [ -f diff-fs.md ]; then
+              cat diff-fs.md
+            fi
+          else
+            echo "No old ZIP, using full ZIP as diff"
+            cp syntaxflow-aikb.zip diff-fs.zip
+            echo "HAS_CHANGES=true" >> $GITHUB_ENV
+          fi
+
+      - name: Update RAG with diff package
+        if: env.HAS_CHANGES == 'true'
+        env:
+          AI_API_KEY: ${{ secrets.AI_API_KEY }}
+          AI_API_MODEL: ${{ secrets.AI_API_MODEL }}
+          AI_API_DOMAIN: ${{ secrets.AI_API_DOMAIN }}
+        run: |
+          echo "=== Updating RAG knowledge base ==="
+          if [ ! -f diff-fs.zip ]; then
+            echo "No diff package found"
+            exit 0
+          fi
+
+          NEW_RAG_FILE="syntaxflow-aikb-new.rag"
+          if [ -f syntaxflow-aikb-old.rag ]; then
+            ./yak scripts/update-rag.yak \
+              --rag-file syntaxflow-aikb-old.rag \
+              --diff-zip diff-fs.zip \
+              --output "$NEW_RAG_FILE" \
+              --concurrency 5
+          else
+            echo "No existing RAG, doing full build..."
+            ./yak scripts/build-syntaxflow-aikb-rag.yak \
+              --base . \
+              --output "$NEW_RAG_FILE" \
+              --concurrency 5
+          fi
+          if [ ! -f "$NEW_RAG_FILE" ]; then
+            echo "ERROR: RAG file not generated"
+            exit 1
+          fi
+          ls -lh "$NEW_RAG_FILE"
+
+      - name: Compress RAG and generate SHA256
+        if: env.HAS_CHANGES == 'true'
+        run: |
+          RAG_FILE="syntaxflow-aikb-new.rag"
+          if [ ! -f "$RAG_FILE" ]; then
+            echo "ERROR: RAG file not found"
+            exit 1
+          fi
+          ./yak gzip -f $RAG_FILE
+          mv ${RAG_FILE}.gzip syntaxflow-aikb.rag.gz
+          SHA256_HASH=$(sha256sum syntaxflow-aikb.rag.gz | awk '{print $1}')
+          echo "$SHA256_HASH" > syntaxflow-aikb.rag.gz.sha256.txt
+          echo "SHA256: $SHA256_HASH"
+          echo "SHA256_HASH=$SHA256_HASH" >> $GITHUB_ENV
+
+      - name: Create timestamp file
+        if: env.HAS_CHANGES == 'true'
+        run: |
+          echo "Upload Time: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" > syntaxflow-aikb.updated_at.txt
+          echo "Commit: $(echo ${{ github.sha }} | cut -c1-7) (${{ github.sha }})" >> syntaxflow-aikb.updated_at.txt
+          echo "Branch: ${{ github.ref_name }}" >> syntaxflow-aikb.updated_at.txt
+          echo "Version: $VERSION" >> syntaxflow-aikb.updated_at.txt
+
+      - name: Upload files to OSS
+        if: env.HAS_CHANGES == 'true'
+        env:
+          OSS_KEY_ID: ${{ secrets.OSS_KEY_ID }}
+          OSS_KEY_SECRET: ${{ secrets.OSS_KEY_SECRET }}
+        run: |
+          ./yak upload-oss -b yaklang --endpoint oss-accelerate.aliyuncs.com \
+            -ak "$OSS_KEY_ID" -sk "$OSS_KEY_SECRET" -t 10 \
+            -f "syntaxflow-aikb.zip:/ai-knowledge-base/syntaxflow-aikb.zip"
+          ./yak upload-oss -b yaklang --endpoint oss-accelerate.aliyuncs.com \
+            -ak "$OSS_KEY_ID" -sk "$OSS_KEY_SECRET" -t 5 \
+            -f "syntaxflow-aikb.updated_at.txt:/ai-knowledge-base/syntaxflow-aikb.updated_at.txt" || true
+          ./yak upload-oss -b yaklang --endpoint oss-accelerate.aliyuncs.com \
+            -ak "$OSS_KEY_ID" -sk "$OSS_KEY_SECRET" -t 10 \
+            -f "syntaxflow-aikb-new.rag:/ai-knowledge-base/rag/syntaxflow-aikb.rag"
+          ./yak upload-oss -b yaklang --endpoint oss-accelerate.aliyuncs.com \
+            -ak "$OSS_KEY_ID" -sk "$OSS_KEY_SECRET" -t 5 \
+            -f "syntaxflow-aikb.rag.gz:${RAG_OSS_DIR}/syntaxflow-aikb.rag.gz"
+          ./yak upload-oss -b yaklang --endpoint oss-accelerate.aliyuncs.com \
+            -ak "$OSS_KEY_ID" -sk "$OSS_KEY_SECRET" -t 5 \
+            -f "syntaxflow-aikb.rag.gz.sha256.txt:${RAG_OSS_DIR}/syntaxflow-aikb.rag.gz.sha256.txt"
+          if [ -f syntaxflow-aikb_new.update-report.md ]; then
+            ./yak upload-oss -b yaklang --endpoint oss-accelerate.aliyuncs.com \
+              -ak "$OSS_KEY_ID" -sk "$OSS_KEY_SECRET" -t 5 \
+              -f "syntaxflow-aikb_new.update-report.md:/ai-knowledge-base/rag/syntaxflow-aikb.update-report.md" || true
+          fi
+          if [ -f syntaxflow-aikb_new.update-report.json ]; then
+            ./yak upload-oss -b yaklang --endpoint oss-accelerate.aliyuncs.com \
+              -ak "$OSS_KEY_ID" -sk "$OSS_KEY_SECRET" -t 5 \
+              -f "syntaxflow-aikb_new.update-report.json:/ai-knowledge-base/rag/syntaxflow-aikb.update-report.json" || true
+          fi
+
+      - name: Download and update rags-latest.json
+        if: env.HAS_CHANGES == 'true'
+        run: |
+          wget -q -O rags-latest.json https://yaklang.oss-accelerate.aliyuncs.com/rag/rags-latest.json || echo "[]" > rags-latest.json
+          jq empty rags-latest.json 2>/dev/null || echo "[]" > rags-latest.json
+          ./yak rag-metainfo \
+            -f rags-latest.json -o rags-latest.json \
+            --register-name "SyntaxFlow AIKB" \
+            --register-name-zh "SyntaxFlow 规则知识库" \
+            --version "$VERSION" \
+            --rag-file "/rag/syntaxflow-aikb/${VERSION}/syntaxflow-aikb.rag.gz" \
+            --hash-file "/rag/syntaxflow-aikb/${VERSION}/syntaxflow-aikb.rag.gz.sha256.txt" \
+            --hash "$SHA256_HASH"
+          cat rags-latest.json
+
+      - name: Upload rags-latest.json
+        if: env.HAS_CHANGES == 'true'
+        env:
+          OSS_KEY_ID: ${{ secrets.OSS_KEY_ID }}
+          OSS_KEY_SECRET: ${{ secrets.OSS_KEY_SECRET }}
+        run: |
+          ./yak upload-oss -b yaklang --endpoint oss-accelerate.aliyuncs.com \
+            -ak "$OSS_KEY_ID" -sk "$OSS_KEY_SECRET" -t 5 \
+            -f "rags-latest.json:/rag/rags-latest.json"
+
+      - name: Verify uploads
+        if: env.HAS_CHANGES == 'true'
+        run: |
+          curl -I "https://yaklang.oss-accelerate.aliyuncs.com${RAG_OSS_DIR}/syntaxflow-aikb.rag.gz" | head -5
+          curl -s "https://yaklang.oss-accelerate.aliyuncs.com/rag/rags-latest.json" | jq .
+          echo "Version: $VERSION"
+          echo "RAG: https://yaklang.oss-accelerate.aliyuncs.com${RAG_OSS_DIR}/syntaxflow-aikb.rag.gz"
+
+      - name: Ensure RAG exists in rags-latest.json (no changes)
+        if: env.HAS_CHANGES != 'true'
+        env:
+          OSS_KEY_ID: ${{ secrets.OSS_KEY_ID }}
+          OSS_KEY_SECRET: ${{ secrets.OSS_KEY_SECRET }}
+        run: |
+          echo "No changes detected in training materials"
+          echo "Checking if RAG is already registered in rags-latest.json..."
+
+          wget -q -O rags-latest.json https://yaklang.oss-accelerate.aliyuncs.com/rag/rags-latest.json || echo "[]" > rags-latest.json
+          jq empty rags-latest.json 2>/dev/null || echo "[]" > rags-latest.json
+
+          EXISTING=$(cat rags-latest.json | jq -r '.[] | select(.name == "SyntaxFlow AIKB") | .name' 2>/dev/null || echo "")
+
+          if [ -n "$EXISTING" ]; then
+            echo "SyntaxFlow AIKB already exists in rags-latest.json"
+            cat rags-latest.json | jq '.[] | select(.name == "SyntaxFlow AIKB")'
+          else
+            echo "SyntaxFlow AIKB not found, registering existing RAG..."
+
+            RAG_URL="https://yaklang.oss-accelerate.aliyuncs.com/ai-knowledge-base/rag/syntaxflow-aikb.rag"
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -I "$RAG_URL")
+
+            if [ "$HTTP_STATUS" = "200" ]; then
+              curl -f -s -o "syntaxflow-aikb-existing.rag" "$RAG_URL"
+              ./yak gzip -f syntaxflow-aikb-existing.rag
+              mv syntaxflow-aikb-existing.rag.gzip syntaxflow-aikb.rag.gz
+
+              SHA256_HASH=$(sha256sum syntaxflow-aikb.rag.gz | awk '{print $1}')
+              echo "$SHA256_HASH" > syntaxflow-aikb.rag.gz.sha256.txt
+
+              ./yak upload-oss -b yaklang --endpoint oss-accelerate.aliyuncs.com \
+                -ak "$OSS_KEY_ID" -sk "$OSS_KEY_SECRET" -t 5 \
+                -f "syntaxflow-aikb.rag.gz:${RAG_OSS_DIR}/syntaxflow-aikb.rag.gz"
+              ./yak upload-oss -b yaklang --endpoint oss-accelerate.aliyuncs.com \
+                -ak "$OSS_KEY_ID" -sk "$OSS_KEY_SECRET" -t 5 \
+                -f "syntaxflow-aikb.rag.gz.sha256.txt:${RAG_OSS_DIR}/syntaxflow-aikb.rag.gz.sha256.txt"
+
+              ./yak rag-metainfo \
+                -f rags-latest.json -o rags-latest.json \
+                --register-name "SyntaxFlow AIKB" \
+                --register-name-zh "SyntaxFlow 规则知识库" \
+                --version "$VERSION" \
+                --rag-file "/rag/syntaxflow-aikb/${VERSION}/syntaxflow-aikb.rag.gz" \
+                --hash-file "/rag/syntaxflow-aikb/${VERSION}/syntaxflow-aikb.rag.gz.sha256.txt" \
+                --hash "$SHA256_HASH"
+
+              ./yak upload-oss -b yaklang --endpoint oss-accelerate.aliyuncs.com \
+                -ak "$OSS_KEY_ID" -sk "$OSS_KEY_SECRET" -t 5 \
+                -f "rags-latest.json:/rag/rags-latest.json"
+
+              echo "SyntaxFlow AIKB registered successfully"
+              cat rags-latest.json
+            else
+              echo "No existing RAG file found at $RAG_URL"
+              echo "Please run with changes to create initial RAG"
+            fi
+          fi
+
+      - name: Upload artifacts
+        if: always() && env.HAS_CHANGES == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: diff-fs
+          path: diff-fs.zip
+          retention-days: 7
+
+      - name: Summary
+        run: |
+          if [ "${HAS_CHANGES:-false}" = "true" ]; then
+            echo "## ✅ SyntaxFlow AIKB RAG Updated" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+            echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| Version | $VERSION |" >> $GITHUB_STEP_SUMMARY
+            echo "| SHA256 | ${SHA256_HASH:-n/a} |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### URLs" >> $GITHUB_STEP_SUMMARY
+            echo "- RAG: https://yaklang.oss-accelerate.aliyuncs.com${RAG_OSS_DIR}/syntaxflow-aikb.rag.gz" >> $GITHUB_STEP_SUMMARY
+            echo "- Index: https://yaklang.oss-accelerate.aliyuncs.com/rag/rags-latest.json" >> $GITHUB_STEP_SUMMARY
+            echo "- JSON: https://yaklang.oss-accelerate.aliyuncs.com/ai-knowledge-base/rag/syntaxflow-aikb.update-report.json" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## No Changes Detected" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "No changes were detected in the training materials." >> $GITHUB_STEP_SUMMARY
+            echo "RAG update and rags-latest.json update were skipped." >> $GITHUB_STEP_SUMMARY
+          fi

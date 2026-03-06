@@ -13,6 +13,7 @@ on:
       - 'rule-examples/**'
       - 'scripts/**'
       - '.github/workflows/upload-aikb.yml'
+      - '.github/workflows/update-rags-latest.yml'
 
   # 允许手动触发
   workflow_dispatch:
@@ -289,58 +290,7 @@ jobs:
           echo ""
           echo "✓ All files uploaded to OSS successfully"
 
-      - name: Download and update rags-latest.json
-        if: success()
-        env:
-          OSS_KEY_ID: ${{ secrets.OSS_KEY_ID }}
-          OSS_KEY_SECRET: ${{ secrets.OSS_KEY_SECRET }}
-        run: |
-          echo "=== Download and update rags-latest.json ==="
-          if [ ! -f syntaxflow-aikb_new.rag ]; then
-            echo "RAG file not built, skipping rags-latest.json update"
-            exit 0
-          fi
-
-          RAGS_JSON="rags-latest.json"
-          RAG_OSS_URL="https://yaklang.oss-accelerate.aliyuncs.com/rag/rags-latest.json"
-
-          echo "Downloading existing rags-latest.json..."
-          wget -q -O "$RAGS_JSON" "$RAG_OSS_URL" || {
-            echo "No existing rags-latest.json found, creating empty array"
-            echo "[]" > "$RAGS_JSON"
-          }
-          if ! jq empty "$RAGS_JSON" 2>/dev/null; then
-            echo "Invalid JSON in rags-latest.json, creating empty array"
-            echo "[]" > "$RAGS_JSON"
-          fi
-
-          VERSION="$(date -u +"%Y%m%d")-$(echo "${{ github.sha }}" | cut -c1-7)"
-          RAG_FILE_SIZE=$(stat -c%s syntaxflow-aikb_new.rag 2>/dev/null || stat -f%z syntaxflow-aikb_new.rag 2>/dev/null || echo 0)
-
-          echo "Updating rags-latest.json with SyntaxFlow AIKB entry..."
-          echo "  Version: $VERSION"
-          echo "  File: /ai-knowledge-base/rag/syntaxflow-aikb.rag"
-          echo "  Size: $RAG_FILE_SIZE bytes"
-
-          ./yak rag-metainfo \
-            -f "$RAGS_JSON" \
-            -o "$RAGS_JSON" \
-            --register-name "SyntaxFlow AIKB" \
-            --register-name-zh "SyntaxFlow 规则知识库" \
-            --version "$VERSION" \
-            --rag-file "/ai-knowledge-base/rag/syntaxflow-aikb.rag"
-
-          echo ""
-          echo "Uploading rags-latest.json to OSS..."
-          ./yak upload-oss -b yaklang --endpoint oss-accelerate.aliyuncs.com \
-            -ak "$OSS_KEY_ID" -sk "$OSS_KEY_SECRET" -t 5 \
-            -f "$RAGS_JSON:/rag/rags-latest.json"
-
-          echo ""
-          echo "✓ rags-latest.json updated and uploaded successfully"
-          echo "New rags-latest.json content:"
-          cat "$RAGS_JSON" | jq .
-
+      # rags-latest.json 仅由 update-rags-latest.yml 更新，以保持与 Yaklang 一致（版本化路径 + gzip + hashfile + hash）
       - name: Verify OSS upload with HEAD requests
         run: |
           echo "=== Verifying OSS uploads ==="
@@ -449,6 +399,7 @@ jobs:
           echo "- ZIP: https://yaklang.oss-accelerate.aliyuncs.com/ai-knowledge-base/syntaxflow-aikb.zip" >> $GITHUB_STEP_SUMMARY
           echo "- Timestamp: https://yaklang.oss-accelerate.aliyuncs.com/ai-knowledge-base/syntaxflow-aikb.updated_at.txt" >> $GITHUB_STEP_SUMMARY
           echo "- RAG: https://yaklang.oss-accelerate.aliyuncs.com/ai-knowledge-base/rag/syntaxflow-aikb.rag" >> $GITHUB_STEP_SUMMARY
+          echo "- rags-latest.json: 由 update-rags-latest 工作流更新（版本化结构）" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           if [ -f diff-fs.md ]; then
             echo "### 📋 Diff Report" >> $GITHUB_STEP_SUMMARY
