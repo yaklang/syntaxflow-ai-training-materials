@@ -34,6 +34,7 @@ syntaxflow-aikb/
 │   ├── xxe-detection.md
 │   ├── dataflow-filter.md
 │   ├── sql-injection-path-sensitive.md   # Cookbook 路径敏感 SQL 注入
+│   ├── rule-self-check-solutions.md      # 规则自检未通过时的解决方案
 │   ├── write-syntaxflow-rule-workflow.md # write_syntaxflow_rule 工作流、check-syntaxflow-syntax
 │   ├── ai-common-mistakes.md             # AI 常见错误与规避
 │   └── desc-errors-troubleshooting.md    # desc 语法错误排错
@@ -129,6 +130,7 @@ err = rag.Import("syntaxflow-aikb.rag", rag.importName("yaklang-syntaxflow-aikb"
 - **nativecall-quick-reference.md**：常用 NativeCall 速查（&lt;include&gt;、&lt;typeName&gt;、&lt;dataflow&gt; 等）
 - **writing-strategies.md**：用户意图、Engine-First、Source-Sink-Filter、主动安全洞察
 - **rule-examples/samples.md**：通用模式（Common Patterns）及示例片段
+- **rule-self-check-solutions.md**：规则自检未通过时的解决方案（语法 / matched 分场景）
 - **write-syntaxflow-rule-workflow.md**：check-syntaxflow-syntax 工具、result_vars_diagnostic 解读
 - **rule-debugging-strategy.md**：matched=false 时的调试思路
 - **ai-common-mistakes.md**：AI 常见错误（desc 格式、spin 绕开验证、迭代失控）

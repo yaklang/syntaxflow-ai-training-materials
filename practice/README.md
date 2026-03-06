@@ -11,6 +11,7 @@
 | dataflow-filter.md | 数据流 + 过滤函数（如 mysqli_real_escape_string） |
 | sql-injection-path-sensitive.md | 路径敏感 SQL 注入（Cookbook 多级告警示例） |
 | **write-syntaxflow-rule-workflow.md** | **write_syntaxflow_rule 工作流**：check-syntaxflow-syntax、result_vars_diagnostic |
+| **rule-self-check-solutions.md** | **规则自检未通过时的解决方案**：语法错误 / matched=false 快速决策表、分场景修复步骤、include 速查 |
 | **rule-debugging-strategy.md** | **matched=false 调试**：4 步排查顺序、4 类案例（用户输入/sink/topdef/filter）、变量链解读、include 速查、参考规则表 |
 | **ai-common-mistakes.md** | **AI 常见错误**：desc 格式、include 必须 as $var、spin 绕开验证、迭代失控、禁止语法 |
 | **include-usage-quickfix.md** | **include 速记**：`<include('golang-gin-context')> as $gin` 正确写法，避免 $gin 未定义 |

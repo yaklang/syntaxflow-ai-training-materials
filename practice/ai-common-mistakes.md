@@ -148,6 +148,7 @@ AI 在 modify_rule 后收到语法错误反馈，直接进行下一次 modify_ru
 
 ## 参考
 
+- `rule-self-check-solutions.md`：规则自检未通过时的解决方案
 - `desc-syntax-quick-reference.md`：desc 格式速查
 - `desc-errors-troubleshooting.md`：desc 语法错误排错
 - `syntax-anti-patterns.md`：禁止语法

@@ -2,6 +2,8 @@
 
 当 check-syntaxflow-syntax 返回 matched=false 时，按以下策略排查，避免无效迭代。
 
+> **快速解决方案**：若需按场景快速定位修复，见 [rule-self-check-solutions.md](./rule-self-check-solutions.md)。
+
 ## 1. 自检未通过时的处理思路（推荐顺序）
 
 按固定顺序逐层排查，避免盲目修改：
