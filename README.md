@@ -27,7 +27,8 @@ syntaxflow-aikb/
 │   ├── sf-sca.md
 │   ├── sf-file-filter.md
 │   ├── nativecall-demos.md
-│   └── advanced-analyzing-dataflow.md
+│   ├── advanced-analyzing-dataflow.md
+│   └── control-flow-limitations.md   # 控制流与 CFG Native（getCfg、cfg*、reachabilityGuard）
 ├── practice/              # 实践示例
 │   ├── README.md
 │   ├── rce-detection.md

@@ -26,6 +26,8 @@
 | sf-file-filter.md | 文件过滤 |
 | nativecall-demos.md | NativeCall 常见用法与示例 |
 | advanced-analyzing-dataflow.md | 数据流路径敏感分析、<dataflow> |
+| **control-flow-limitations.md** | **控制流与 CFG Native**：`getCfg`/`cfg*`/`reachabilityGuard`、Case B、与 `only_reachable` / TopDef 配合 |
+| sf-cfg-native.md | 入口 stub，正文见 **control-flow-limitations.md** |
 | syntax-anti-patterns.md | **禁止使用的语法**（rule、pattern、call、with_param、without） |
 
 ## 阅读顺序建议
@@ -33,4 +35,4 @@
 1. **入门**：intro → quick-start → rule-intro  
 2. **语句**：intro-and-desc → sf-search → sf-filter → sf-dataflow  
 3. **进阶**：sf-func-call → sf-dot-call-chain → sf-nativecall  
-4. **实战**：nativecall-demos → advanced-analyzing-dataflow → cookbook-summary  
+4. **实战**：nativecall-demos → advanced-analyzing-dataflow → **control-flow-limitations（CFG / getCfg）** → cookbook-summary  
